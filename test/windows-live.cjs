@@ -1,0 +1,76 @@
+const fs = require('node:fs/promises');
+const path = require('node:path');
+const os = require('node:os');
+const { spawn, execFile } = require('node:child_process');
+const { promisify } = require('node:util');
+const readline = require('node:readline');
+const assert = require('node:assert/strict');
+const { Journal } = require('../src/journal.cjs');
+const exec = promisify(execFile);
+const ps = path.join(process.env.SystemRoot, 'System32/WindowsPowerShell/v1.0/powershell.exe');
+const quote = s => "'" + s.replaceAll("'", "''") + "'";
+const runPs = script => exec(ps, ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { windowsHide: true });
+(async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'aether-windows-live-'));
+  const worker = spawn(ps, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', path.resolve(__dirname, '../src/worker.ps1')], { windowsHide: true });
+  let sequence = 0, fixture, boost = [], pending = new Map();
+  const ask = q => new Promise((resolve, reject) => {
+    const id = ++sequence, timer = setTimeout(() => { pending.delete(id); reject(Error('Windows operation timed out')); }, 15000);
+    pending.set(id, { resolve, reject, timer }); worker.stdin.write(JSON.stringify({ ...q, id }) + '\n');
+  });
+  readline.createInterface({ input: worker.stdout }).on('line', line => {
+    const r = JSON.parse(line), p = pending.get(r.id); if (!p) return;
+    clearTimeout(p.timer); pending.delete(r.id); r.ok ? p.resolve(r.data) : p.reject(Error(r.error));
+  });
+  worker.stderr.on('data', x => process.stderr.write(x));
+  worker.on('exit', () => { for(const p of pending.values()) {clearTimeout(p.timer);p.reject(Error('Worker exited'));} pending.clear(); });
+  const journal = new Journal(path.join(dir, 'recovery.json'), ask); await journal.load();
+  const result = { at: new Date().toISOString(), passed: false };
+  try {
+    const fixtureExe = path.join(dir, 'AetherIntegrationFixture.exe');
+    const program = 'using System; using System.Windows.Forms; public class Fixture { [STAThread] public static void Main() { var memory=new byte[33554432]; for(int i=0;i<memory.Length;i+=4096)memory[i]=42; var form=new Form(); form.Text="Aether integration fixture"; form.Width=360; form.Height=100; Application.Run(form); GC.KeepAlive(memory); } }';
+    await runPs(`Add-Type -TypeDefinition ${quote(program)} -ReferencedAssemblies System.Windows.Forms -OutputAssembly ${quote(fixtureExe)} -OutputType WindowsApplication`);
+    fixture = spawn(fixtureExe, [], { windowsHide: false });
+    await new Promise((resolve, reject) => { const t=setTimeout(resolve, 1500); fixture.once('error',e=>{clearTimeout(t);reject(e);}); });
+    const pref = 'HKCU:\\Software\\Microsoft\\DirectX\\UserGpuPreferences';
+    assert.equal((await ask({ action: 'read', path: pref, name: fixtureExe })).exists, false);
+    await journal.apply('fixture', pref, fixtureExe, 'GpuPreference=2;', 'String');
+    assert.equal((await ask({ action: 'read', path: pref, name: fixtureExe })).value, 'GpuPreference=2;');
+    assert.equal((await journal.restore('fixture')).restored, 1);
+    assert.equal((await ask({ action: 'read', path: pref, name: fixtureExe })).exists, false);
+    result.registry = 'Real GPU-preference registry write, read-back and exact removal passed for an isolated fixture executable.';
+    const before = await ask({ action: 'power' }), key = 'POWER:' + before.scheme;
+    result.powerBefore = before;
+    await journal.apply('cpu', key, 'BoostMode', before.boost === 0 ? 1 : 0, 'PowerAC');
+    assert.equal((await ask({ action: 'power' })).boost, before.boost === 0 ? 1 : 0);
+    await journal.apply('cpu', key, 'MaximumProcessorState', before.max === 99 ? 98 : 99, 'PowerAC');
+    assert.equal((await ask({ action: 'power' })).max, before.max === 99 ? 98 : 99);
+    await journal.apply('cpu', key, 'EnergyPreference', before.epp === 60 ? 61 : 60, 'PowerAC');
+    assert.equal((await ask({ action: 'power' })).epp, before.epp === 60 ? 61 : 60);
+    const restored = await journal.restore('cpu'); assert.equal(restored.skipped.length, 0);
+    assert.deepEqual(await ask({ action: 'power' }), before);
+    result.power = 'Temporary efficient CPU policy written and verified; original AC policy restored.';
+    const proc = await ask({ action: 'processes', executables: [fixtureExe] });
+    boost = proc.boosted; assert.ok(boost.some(p => p.pid === fixture.pid));
+    const priority = JSON.parse((await runPs(`Get-Process -Id ${fixture.pid} | Select-Object -ExpandProperty PriorityClass | ConvertTo-Json -Compress`)).stdout);
+    assert.equal(priority, 32768);
+    const restore = await ask({ action: 'restorePriority', items: boost }); assert.equal(restore.failed.length, 0); boost=[];
+    const normal = JSON.parse((await runPs(`Get-Process -Id ${fixture.pid} | Select-Object -ExpandProperty PriorityClass | ConvertTo-Json -Compress`)).stdout);
+    assert.equal(normal, 32);
+    result.priority = 'Real fixture process raised from Normal to AboveNormal and restored to Normal.';
+    const apps = await ask({ action: 'apps', owner: process.pid }); const target=apps.find(p=>p.pid===fixture.pid); assert.ok(target);
+    const closed = await ask({ action: 'closeApp', owner: process.pid, ...target }); assert.equal(closed.requested, true);
+    await new Promise((resolve,reject)=>{if(fixture.exitCode!==null)return resolve();const t=setTimeout(()=>reject(Error('Fixture did not close')),5000);fixture.once('exit',()=>{clearTimeout(t);resolve();});});
+    result.memory = { normalCloseVerified: true, fixtureWorkingSetMB: closed.beforeMB, scope: 'Fixture process working set was released on normal exit; no whole-system free-RAM improvement claim.' };
+    result.passed = true;
+    console.log('PASS: real registry write/undo, CPU power policy write/undo, process priority boost/restore, normal app close and process exit.');
+  } finally {
+    if (boost.length) await ask({ action: 'restorePriority', items: boost }).catch(() => {});
+    const cleanup=await journal.restore(null); result.cleanup=cleanup;
+    if(fixture && fixture.exitCode===null)fixture.kill();
+    worker.stdin.end();
+    await fs.writeFile(path.resolve(__dirname, '../../../outputs/Aether-Windows-verification.json'), JSON.stringify(result,null,2));
+    if(!journal.entries.length && path.dirname(dir)===os.tmpdir() && path.basename(dir).startsWith('aether-windows-live-')) await fs.rm(dir,{recursive:true,force:true});
+    else console.error('Recovery records retained at',dir);
+  }
+})().catch(e=>{console.error(e);process.exitCode=1;});

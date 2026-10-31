@@ -1,0 +1,13 @@
+node_modules/
+.agents/
+debug.log
+*.log
+.env*
+dist/
+build/
+*.exe
+*.7z
+*.zip
+test-results/
+playwright-report/
+*.tmp

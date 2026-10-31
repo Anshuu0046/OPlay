@@ -1,0 +1,47 @@
+{
+  "name": "oplay",
+  "version": "2.1.0",
+  "description": "A local-first Windows game library with live telemetry and reversible gaming preferences",
+  "main": "src/main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/*.test.cjs",
+    "test:ui": "node test/ui.cjs",
+    "dist": "electron-builder --win portable --x64"
+  },
+  "keywords": [],
+  "type": "commonjs",
+  "devDependencies": {
+    "electron": "45.2.1",
+    "electron-builder": "26.18.0",
+    "playwright": "1.64.1"
+  },
+  "productName": "OPlay",
+  "author": "OPlay",
+  "license": "MIT",
+  "build": {
+    "appId": "local.oplay.gamelibrary",
+    "productName": "OPlay",
+    "asar": true,
+    "asarUnpack": [
+      "src/*.ps1",
+      "src/*.cs"
+    ],
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "output": "../../outputs/build"
+    },
+    "win": {
+      "target": "portable",
+      "signAndEditExecutable": true,
+      "icon": "src/assets/icon.ico"
+    },
+    "portable": {
+      "artifactName": "OPlay-2.1.0-Windows.exe"
+    },
+    "forceCodeSigning": false
+  }
+}
