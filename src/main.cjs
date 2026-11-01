@@ -217,13 +217,22 @@ function handlers() {
   bind('unlocked-docs', () => shell.openExternal('https://github.com/ShyVortex/dlss-unlocked/releases'));
   bind('fsr-docs', () => shell.openExternal('https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/releases'));
   bind('components', (operation, payload = {}) => {
-    if (!['refresh','download','inspect','swap','force-runtime','opti','unlocked','restore'].includes(operation) || !payload || typeof payload !== 'object') throw Error('Invalid component operation');
+    if (!['refresh','download','download-opti','download-unlocked','inspect','swap','force-runtime','opti','unlocked','restore'].includes(operation) || !payload || typeof payload !== 'object') throw Error('Invalid component operation');
     if (TEST && operation !== 'inspect') throw Error('Mutations are disabled in test mode');
     const work = componentQueue.then(async () => {
       if (operation === 'refresh') return components.refresh();
       if (operation === 'download') return components.download(payload.id);
+      if (operation === 'download-opti') { await components.downloadOpti(); return components.snapshot(); }
+      if (operation === 'download-unlocked') { await components.downloadUnlocked(); return components.snapshot(); }
       if (operation === 'inspect') return components.inspectGame(getGame(payload.gameId));
       const game = operation === 'restore' ? getGame(components.journal.find(t => t.id === payload.id)?.gameId) : getGame(payload.gameId);
+      if (['force-runtime','opti','unlocked'].includes(operation) && (!game.executable || !await fs.stat(game.executable).then(s => s.isFile()).catch(() => false))) {
+        const executable = await chooseExe(game);
+        if (!executable) throw Error('Game executable selection cancelled');
+        const relative = path.relative(game.installDir, executable);
+        if (relative.startsWith('..' + path.sep) || relative === '..' || path.isAbsolute(relative)) throw Error('Choose an executable inside this game folder');
+        game.executable = executable; await persist();
+      }
       const running = await ask({ action: 'gameRunning', root: game.installDir });
       if (running.length) throw Error('Close the game before changing components: ' + running.join(', '));
       if (operation === 'restore') return components.restore(payload.id);

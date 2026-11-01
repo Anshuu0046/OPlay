@@ -50,7 +50,7 @@ async function ensureParents(root,relative,created){
 async function fetchBytes(url,max,hosts) {
   for(let redirects=0;redirects<6;redirects++){
     const u=new URL(url);if(u.protocol!=='https:'||u.username||u.password||u.port||!hosts.has(u.hostname))throw Error('Download host is not trusted');
-    const response=await fetch(u,{redirect:'manual',signal:AbortSignal.timeout(180000),headers:{'User-Agent':'OPlay/2.2'}});
+    const response=await fetch(u,{redirect:'manual',signal:AbortSignal.timeout(180000),headers:{'User-Agent':'OPlay/2.3'}});
     if(response.status>=300&&response.status<400){url=new URL(response.headers.get('location'),u).href;continue;}
     if(!response.ok)throw Error('Download failed: HTTP '+response.status);
     if(Number(response.headers.get('content-length'))>max)throw Error('Download exceeds size limit');
@@ -63,7 +63,7 @@ async function fetchFile(url,destination,max,hosts){
   try{
     for(let redirects=0;redirects<6;redirects++){
       const u=new URL(url);if(u.protocol!=='https:'||u.username||u.password||u.port||!hosts.has(u.hostname))throw Error('Download host is not trusted');
-      const response=await fetch(u,{redirect:'manual',signal:AbortSignal.timeout(15*60*1000),headers:{'User-Agent':'OPlay/2.2'}});
+      const response=await fetch(u,{redirect:'manual',signal:AbortSignal.timeout(15*60*1000),headers:{'User-Agent':'OPlay/2.3'}});
       if(response.status>=300&&response.status<400){url=new URL(response.headers.get('location'),u).href;continue;}
       if(!response.ok)throw Error('Download failed: HTTP '+response.status);
       if(Number(response.headers.get('content-length'))>max)throw Error('Download exceeds size limit');
@@ -121,8 +121,9 @@ async function scanComponents(root) {
 }
 class Components {
   constructor(directory,inspect) {this.directory=directory;this.inspect=inspect;this.catalog=[];this.cache=[];this.journal=[];this.community=null;this.fsr=null;this.checkedAt=null;this.refreshError=null;this.file=path.join(directory,'transactions.json');}
-  async load(){await fs.mkdir(this.directory,{recursive:true});this.catalog=await readJson(path.join(this.directory,'catalog.json'),[]);this.cache=await readJson(path.join(this.directory,'cache.json'),[]);this.journal=await readJson(this.file,[]);const feed=await readJson(path.join(this.directory,'community.json'),{});this.community=feed.unlocked||null;this.fsr=feed.fsr||null;this.checkedAt=feed.checkedAt||null;}
-  snapshot(){return {catalog:this.catalog,cache:this.cache.map(({file,...record})=>record),transactions:this.journal.map(({changes,...record})=>({...record,files:changes.map(({relative})=>relative)})),optiscaler:OPTI,community:this.community,fsr:this.fsr,checkedAt:this.checkedAt,refreshError:this.refreshError};}
+  async load(){await fs.mkdir(this.directory,{recursive:true});this.catalog=await readJson(path.join(this.directory,'catalog.json'),[]);this.cache=await readJson(path.join(this.directory,'cache.json'),[]);this.journal=await readJson(this.file,[]);const feed=await readJson(path.join(this.directory,'community.json'),{});this.community=feed.unlocked||null;this.fsr=feed.fsr||null;this.checkedAt=feed.checkedAt||null;await this.checkPackageCache();}
+  async checkPackageCache(){this.communityCached=!!this.community&&await fs.access(path.join(this.directory,'unlocked',this.community.sha256,this.community.name)).then(()=>true,()=>false);this.optiCached=await fs.access(path.join(this.directory,'optiscaler',OPTI.version,'package.7z')).then(()=>true,()=>false);}
+  snapshot(){return {catalog:this.catalog,cache:this.cache.map(({file,...record})=>record),transactions:this.journal.map(({changes,...record})=>({...record,files:changes.map(({relative})=>relative)})),optiscaler:OPTI,community:this.community,communityCached:!!this.communityCached,optiCached:!!this.optiCached,fsr:this.fsr,checkedAt:this.checkedAt,refreshError:this.refreshError};}
   async refresh(){
     const results=await Promise.allSettled([fetchBytes(CATALOG,8000000,new Set(['beeradmoore.github.io'])),fetchBytes(UNLOCKED_API,3000000,new Set(['api.github.com'])),fetchBytes(FSR_API,3000000,new Set(['api.github.com']))]);
     const errors=[];
@@ -130,7 +131,7 @@ class Components {
     if(results[1].status==='fulfilled'){try{this.community=normalizeUnlocked(JSON.parse(results[1].value.toString('utf8')));}catch(e){errors.push('Community release: '+e.message);}}else errors.push('Community release: '+results[1].reason.message);
     if(results[2].status==='fulfilled'){try{this.fsr=normalizeFsr(JSON.parse(results[2].value.toString('utf8')));}catch(e){errors.push('FSR SDK: '+e.message);}}else errors.push('FSR SDK: '+results[2].reason.message);
     if(errors.length===3)throw Error(errors.join('; '));
-    this.checkedAt=new Date().toISOString();this.refreshError=errors.join('; ')||null;await saveJson(path.join(this.directory,'community.json'),{unlocked:this.community,fsr:this.fsr,checkedAt:this.checkedAt});return this.snapshot();
+    this.checkedAt=new Date().toISOString();this.refreshError=errors.join('; ')||null;await saveJson(path.join(this.directory,'community.json'),{unlocked:this.community,fsr:this.fsr,checkedAt:this.checkedAt});await this.checkPackageCache();return this.snapshot();
   }
   async refreshIfDue(){if(!this.checkedAt||!Number.isFinite(Date.parse(this.checkedAt))||Date.now()-Date.parse(this.checkedAt)>=DAY)return this.refresh();return this.snapshot();}
   async download(id){
@@ -207,9 +208,7 @@ class Components {
     const scan=await this.inspectGame(game);
     if(!game.executable)throw Error('Choose the actual game executable before installing OptiScaler');await pe64(game.executable,true);
     const root=scan.root,dir=path.dirname(await fs.realpath(game.executable));if(dir!==root&&!under(root,dir))throw Error('Executable is outside the game folder');
-    const cache=path.join(this.directory,'optiscaler',OPTI.version);await fs.mkdir(cache,{recursive:true});const archive=path.join(cache,'package.7z');
-    if(await hash(archive).catch(()=>null)!==OPTI.sha256)await fs.writeFile(archive,await fetchBytes(OPTI.url,134217728,new Set(['github.com','release-assets.githubusercontent.com','objects.githubusercontent.com'])));
-    if(await hash(archive)!==OPTI.sha256)throw Error('OptiScaler release checksum differs');
+    const archive=await this.downloadOpti();const cache=path.dirname(archive);
     const tar=path.join(process.env.SystemRoot,'System32/tar.exe'),options={windowsHide:true,timeout:60000,maxBuffer:2000000};
     const names=(await exec(tar,['-tf',archive],options)).stdout.trim().split(/\r?\n/);
     const selected=names.filter(n=>/^(OptiScaler\.dll|OptiScaler\.ini|fakenvapi\.(dll|ini)|libxe(ss|ll|ss_fg|ss_dx11)\.dll|amd_fidelityfx(_[a-z0-9]+)?\.dll|dlssg_to_fsr3_amd_is_better\.dll|Licenses\/[A-Za-z0-9_. -]+)$/.test(n));
@@ -223,14 +222,23 @@ class Components {
     const changes=[];for(const name of selected){const source=path.join(extracted,name);await regular(source);const targetName=name.startsWith('Licenses/')?'OPlay-OptiScaler-'+path.basename(name):name==='OptiScaler.dll'?'dxgi.dll':name;changes.push({relative:path.relative(root,path.join(dir,targetName)),source});}
     return this.transact(game,changes,'OptiScaler '+OPTI.version+' · '+(output==='off'?'upscaling':output==='xefg'?'XeSS frame generation':'FSR frame generation'));
   }
+  async downloadOpti(){
+    const cache=path.join(this.directory,'optiscaler',OPTI.version);await fs.mkdir(cache,{recursive:true});const archive=path.join(cache,'package.7z');
+    if(await hash(archive).catch(()=>null)!==OPTI.sha256){await fs.rm(archive,{force:true});await fetchFile(OPTI.url,archive,134217728,new Set(['github.com','release-assets.githubusercontent.com','objects.githubusercontent.com']));}
+    if(await hash(archive)!==OPTI.sha256)throw Error('OptiScaler release checksum differs');this.optiCached=true;return archive;
+  }
+  async downloadUnlocked(){
+    const release=this.community;if(!release)throw Error('Refresh the community release feed first');
+    const cache=path.join(this.directory,'unlocked',release.sha256);await fs.mkdir(cache,{recursive:true});const archive=path.join(cache,release.name);
+    if(await hash(archive).catch(()=>null)!==release.sha256){await fs.rm(archive,{force:true});await fetchFile(release.url,archive,1073741824,new Set(['github.com','release-assets.githubusercontent.com','objects.githubusercontent.com']));}
+    if(await hash(archive)!==release.sha256)throw Error('Community release checksum differs');this.communityCached=true;return archive;
+  }
   async installUnlocked(game){
     const release=this.community;if(!release)throw Error('Refresh the community release feed first');
     if(!game.executable)throw Error('Choose the actual game executable first');await pe64(game.executable,true);
     const root=await gameRoot(game.installDir),dir=path.dirname(await fs.realpath(game.executable));
     if(dir!==root&&!under(root,dir))throw Error('Executable is outside the game folder');
-    const cache=path.join(this.directory,'unlocked',release.sha256);await fs.mkdir(cache,{recursive:true});const archive=path.join(cache,release.name);
-    if(await hash(archive).catch(()=>null)!==release.sha256){await fs.rm(archive,{force:true});await fetchFile(release.url,archive,1073741824,new Set(['github.com','release-assets.githubusercontent.com','objects.githubusercontent.com']));}
-    if(await hash(archive)!==release.sha256)throw Error('Community release checksum differs');
+    const archive=await this.downloadUnlocked();const cache=path.dirname(archive);
     const extracted=await fs.mkdtemp(path.join(cache,'extract-'));
     try{
       const script=path.join(__dirname,'component-tools.ps1').replace(/app\.asar([\\/])/,'app.asar.unpacked$1');

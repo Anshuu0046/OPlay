@@ -1,6 +1,6 @@
-# OPlay 2.2 for Windows
+# OPlay 2.3 for Windows
 
-OPlay is a local Windows game library with graphics runtime management, live telemetry and reversible system profiles. Download `OPlay-2.2.0-Windows.exe` from the [official releases](https://github.com/Anshuu0046/OPlay/releases). Run the portable executable; it extracts before opening. Windows x64; verified on Windows 11. The executable is unsigned, so Windows SmartScreen may ask for confirmation. Check the release SHA-256 before running it.
+OPlay is a local Windows game library with graphics runtime management, live telemetry and reversible system profiles. Download `OPlay-2.3.0-Windows.exe` from the [official releases](https://github.com/Anshuu0046/OPlay/releases). Run the portable executable; it extracts before opening. Windows x64; verified on Windows 11. The executable is unsigned, so Windows SmartScreen may ask for confirmation. Check the release SHA-256 before running it.
 
 The [public download site](https://oplay-windows-library.anshumantripathy0056.chatgpt.site/) provides the latest verified release link. The source and documentation are in this repository. OPlay is independent from DLSS Swapper, DLSS 5 Manager and OptiScaler.
 
@@ -8,11 +8,13 @@ The [public download site](https://oplay-windows-library.anshumantripathy0056.ch
 
 ## Interface
 
-The interface uses one glass navigation rail, widescreen game artwork, a cover grid and dark/light themes. Steam hero artwork is read separately from portrait covers. Windows 11 22H2+ uses native DWM Acrylic; older Windows has a fallback. System transparency preferences are preserved. The initial window fits the monitor work area. Keyboard navigation, drag selection, reduced motion, visible focus states and 1040-pixel layouts are tested.
+The interface uses one frosted glass navigation rail, soft material lighting, widescreen game artwork, a cover grid and dark/light themes. Steam hero artwork is read separately from portrait covers. Windows 11 22H2+ uses native DWM Acrylic; older Windows has a fallback. System transparency preferences are preserved. The initial window fits the monitor work area. Keyboard navigation, drag selection, reduced motion, visible focus states and 1040-pixel layouts are tested. The game picker is a keyboard-accessible glass menu; top-edge window control clicks are covered by the UI test.
 
 ## Graphics Studio
 
 - **Game profiles:** inspect an actual installation for DLSS, FSR and XeSS runtime DLLs, their versions and signatures.
+- **Game details:** choose a library game and directly install the latest community MFG/neural package or an OptiScaler FSR frame-generation route. The same panel offers launch, per-game Windows optimization and a link to Graphics Studio. MFG and neural buttons use the same upstream package; the FSR 3 / 4 route uses OptiScaler. Installing files is not proof that a game activates them.
+- **Community downloads:** Runtime library has separate download and install actions for the DLSS Unlocked bundle and OptiScaler FSR frame-generation route. Cached status survives an app restart. The current DLSS Unlocked archive includes FSR upscaling and frame-generation DLLs, but its bundled versions can lag AMD's current SDK.
 - **Runtime library:** OPlay checks the upstream DLSS Swapper DLL catalog and community release feeds on startup and once per day while open. Manual refresh is available. Only curated, non-development entries marked signed are listed. Downloaded DLLs must match the catalog hash, contain an x64 PE image and have a valid Windows NVIDIA/AMD/Intel publisher signature. A SHA-256 is recorded locally. You can swap an existing component or directly install a downloaded DLL beside a selected game executable even when it was absent.
 - **OptiScaler profiles:** download pinned upstream OptiScaler 0.9.4, check its SHA-256, and install a DX12 x64 profile beside the selected game executable. Choose automatic/DLSS/FSR/XeSS upscaling and off/FSR/XeSS frame generation. The profile selects a native DLSSG input when found, otherwise the existing upscaler input. Compatibility and overlay configuration still need checking in the game. Runtime binaries and license files come from upstream; OPlay does not run the upstream batch installer.
 - **Experimental DLSS Unlocked route:** OPlay checks [ShyVortex's DLSS Unlocked releases](https://github.com/ShyVortex/dlss-unlocked/releases) daily and offers the latest standalone package from within Graphics Studio. On request it downloads the upstream archive, checks GitHub's published SHA-256, extracts an allowlisted set of proxy, MFG, OptiScaler and neural-rendering files, checks DLL architecture, and installs beside the selected game executable. No package binaries are bundled with OPlay. The Oct 30, 2026 `NR-v0.9.81` package was verified in an isolated fixture: 61 files installed and restored exactly after a fresh journal load. It has not been run in a user's game.
@@ -72,7 +74,7 @@ powershell -NoProfile -File test/nvidia-sensor.ps1
 node test/windows-live.cjs
 npm run dist
 node test/ui.cjs ../../outputs/build/win-unpacked/OPlay.exe
-node test/portable.cjs ../../outputs/build/OPlay-2.2.0-Windows.exe
+node test/portable.cjs ../../outputs/build/OPlay-2.3.0-Windows.exe
 ```
 
 `components-live` uses a generated fixture with real signed upstream runtimes; it never launches the fixture or modifies a user game. It verifies download/signature checks, DLL swap/restore, upstream OptiScaler extraction/profile installation and exact restoration of the initial folder. `unlocked-live` verifies the full checksum-matched community package in a generated fixture, then restores the folder exactly. Run `node test/unlocked-live.cjs <optional path to verified standalone ZIP>` to repeat it; without a local archive it downloads the current package. Unit tests cover tampered catalogs, traversal/links, direct installs, preservation of external changes, restart recovery and rollback after an injected locked-file failure. UI tests use isolated profiles, disable OS/game mutations, and check library interactions, both themes, Graphics Studio, native Acrylic, keyboard/drag/reduced-motion behavior, layouts, sandboxing and automatic error logs.

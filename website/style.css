@@ -4,3 +4,11 @@
 @media(max-width:950px){.shell{padding:0 26px}.site-header{gap:20px}.site-header nav{gap:15px}.intro-index{display:none}.app-frame img{max-height:510px}.feature-section{padding:100px 0 75px}.detail-band{padding:40px;gap:40px}.requirements{padding:90px 0}.download-panel{padding:38px}footer{flex-wrap:wrap}footer p{margin-left:0}}
 @media(max-width:670px){.shell{padding:0 18px}.site-header{height:70px}.site-header nav{display:none}.header-download{margin-left:auto;font-size:11px;padding:9px}.header-download span{display:none}.intro{min-height:auto}.intro-copy{padding:75px 0 57px}.intro h1{font-size:clamp(54px,14vw,85px);letter-spacing:-4px}.lead{font-size:16px}.release-note{line-height:1.7}.app-frame{border-radius:12px;padding:5px 5px 0}.frame-top{height:26px}.app-frame img{max-height:350px}.feature-section{padding:85px 0 55px}.feature-grid{grid-template-columns:1fr;margin-top:30px;gap:0}.feature-grid article{min-height:auto;padding-bottom:32px}.feature-grid h3{margin:17px 0 8px}.detail-band{display:block;padding:32px 25px}.detail-copy{margin-top:33px}.detail-copy p{font-size:15px}.requirements{padding:80px 0}.facts{grid-template-columns:1fr}.facts>div{min-height:auto;padding:23px}.download-panel{display:block;padding:30px 24px}.download-panel h2{font-size:28px}.download-links{margin-top:29px}.download-links .button{width:auto}footer{margin-top:68px;gap:20px}footer p{order:3;flex-basis:100%}}
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*::before,*::after{transition:none!important}}
+
+:root{--bg:#020203;--panel:#0d0d10;--border:#2c2b30;--text:#f5f5f6;--muted:#b0b0b6;--dim:#8c8c94;--accent:#e45b62}
+body{background:radial-gradient(circle at 88% 8%,#290b0e 0,#020203 24%);background-attachment:fixed}
+.button.primary{color:#fff}
+.app-frame{background:#0c0c0e;border-color:#333238;box-shadow:0 25px 65px #0008,0 0 70px #a72d3515}
+.detail-band{background:linear-gradient(120deg,#151316,#0a0a0c 70%)}
+.download-panel{border-color:#5c3035;background:linear-gradient(120deg,#201013,#0e0b0d);box-shadow:0 15px 45px #0004}
+.header-download{border-color:#514044}

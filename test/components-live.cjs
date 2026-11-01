@@ -21,7 +21,7 @@ const exec=promisify(execFile);
     await manager.swap(game,original.name,versions[0].id);assert.notEqual(await hash(path.join(game.installDir,original.name)),before);await manager.restore(manager.journal[0].id);assert.equal(await hash(path.join(game.installDir,original.name)),before);
     report.signedRuntimeDownload=true;report.swapAndExactRestore=true;report.runtimeVersions=versions.slice(0,2).map(r=>r.version);
     const opti=path.join(manager.directory,'optiscaler','0.9.4');await fs.mkdir(opti,{recursive:true});const seed=path.resolve(__dirname,'../../research/optiscaler.7z');if(await fs.stat(seed).then(()=>true,()=>false))await fs.copyFile(seed,path.join(opti,'package.7z'));
-    await manager.installOpti(game,'fsrfg','auto');assert.ok((await fs.stat(path.join(game.installDir,'dxgi.dll'))).size>100000);
+    await manager.installOpti(game,'fsrfg','auto');assert.equal(manager.snapshot().optiCached,true,'FSR route package should appear downloaded');assert.ok((await fs.stat(path.join(game.installDir,'dxgi.dll'))).size>100000);
     const ini=await fs.readFile(path.join(game.installDir,'OptiScaler.ini'),'utf8');assert.ok(/FGOutput=fsrfg/.test(ini));assert.ok(/FGInput=upscaler/.test(ini));assert.ok(/Enabled=true/.test(ini));
     report.installedProfileFiles=manager.journal[0].changes.length;await manager.restore(manager.journal[0].id);
     assert.equal(await hash(path.join(game.installDir,original.name)),before);assert.deepEqual((await fs.readdir(game.installDir)).sort(),['Fixture.exe',original.name].sort());

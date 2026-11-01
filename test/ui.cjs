@@ -37,6 +37,9 @@ async function main() {
     if (state.games.length) assert.ok((await page.locator('#featured-game').innerText()).includes(([...state.games].sort((a,b)=>(b.lastLaunched||'').localeCompare(a.lastLaunched||'')||Number(!!b.hero)-Number(!!a.hero))[0]).name));
     if (state.games.length) {
       await page.locator('.game-art').first().press('Enter'); assert.equal(await page.locator('#game-dialog').evaluate(e => e.open), true);
+      assert.equal(await page.locator('#game-dialog .game-route').count(), 4);
+      assert.equal(await page.locator('#game-dialog [data-game-action="optimize"],#game-dialog [data-game-action="undo"]').count(), 1);
+      await page.screenshot({path:path.resolve(__dirname,'../../../outputs/OPlay-game-actions-preview.png')});
       await page.keyboard.press('Escape');
     }
     await page.locator('.rail-item[data-page="components"]').click();
@@ -45,8 +48,19 @@ async function main() {
     assert.equal(await page.locator('#force-runtime-install').isVisible(), true);
     assert.equal(await page.locator('#force-runtime-install').isDisabled(), true, 'No runtime is cached in the isolated profile');
     assert.equal(await page.locator('#unlocked-install').isVisible(), true);
+    await page.locator('#game-picker-trigger').click();
+    assert.equal(await page.locator('#game-picker-menu').isVisible(), true);
+    assert.equal(await page.locator('.game-picker-option').count(), state.games.length);
+    await page.screenshot({path:path.resolve(__dirname,'../../../outputs/OPlay-game-picker-preview.png')});
+    await page.locator('.game-picker-option').last().click();
+    assert.equal(await page.locator('#game-picker-menu').isVisible(), false);
+    assert.equal(await page.locator('#component-game').inputValue(), state.games.at(-1).id);
+    await page.locator('#game-picker-trigger').focus(); await page.keyboard.press('ArrowDown');
+    assert.equal(await page.locator('#game-picker-menu').isVisible(), true);
+    await page.keyboard.press('Escape'); assert.equal(await page.locator('#game-picker-menu').isVisible(), false);
     await page.locator('[data-studio-view="downloads"]').click();
     assert.equal(await page.locator('#studio-downloads').isVisible(), true);
+    assert.equal(await page.locator('.package-card').count(), 2);
     await page.locator('[data-studio-view="compatibility"]').click();
     assert.equal(await page.locator('#studio-compatibility').isVisible(), true);
     await page.locator('#page-components').evaluate(el=>Promise.all(el.getAnimations({subtree:true}).map(a=>a.finished.catch(()=>{}))));
@@ -66,6 +80,16 @@ async function main() {
     await page.screenshot({path:path.resolve(__dirname,'../../../outputs/OPlay-light-preview.png'),fullPage:true});
     await page.locator('[data-action="theme"]').click();
     await page.waitForFunction(()=>document.documentElement.dataset.theme==='dark');
+    const controlsHit = await page.evaluate(() => ['minimize','maximize','close'].map(action=>{const el=document.querySelector(`[data-window="${action}"]`),r=el.getBoundingClientRect();return {action,hit:document.elementFromPoint(r.left+r.width/2,2)?.closest('[data-window]')?.dataset.window};}));
+    assert.ok(controlsHit.every(x=>x.action===x.hit),'Top-edge window controls must be the pointer target');
+    const maximize=page.locator('[data-window="maximize"]');const box=await maximize.boundingBox();
+    await page.mouse.click(box.x+box.width/2,2);
+    assert.equal(await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].isMaximized()),true);
+    const restoredBox=await maximize.boundingBox();await page.mouse.click(restoredBox.x+restoredBox.width/2,2);
+    assert.equal(await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].isMaximized()),false);
+    const minimizeBox=await page.locator('[data-window="minimize"]').boundingBox();await page.mouse.click(minimizeBox.x+minimizeBox.width/2,2);
+    assert.equal(await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].isMinimized()),true);
+    await app.evaluate(({BrowserWindow})=>{const win=BrowserWindow.getAllWindows()[0];win.restore();win.show();win.focus();});
     // Exercise the requested hold-and-drag gesture across the glass selector.
     await page.locator('.rail-nav').scrollIntoViewIfNeeded();
     const from = await page.locator('.rail-item[data-page="library"]').boundingBox(), to = await page.locator('.rail-item[data-page="tuning"]').boundingBox();

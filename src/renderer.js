@@ -210,7 +210,7 @@ function renderTelemetry(next) {
 function details(id) {
   const g = state.games.find(g => g.id === id); if (!g) return;
   dialogGame = id;
-  $('#game-detail').innerHTML = `<h2>${escapeHtml(g.name)}</h2><p>${escapeHtml(g.store)} · ${g.optimized ? 'Windows High performance GPU preference selected' : 'Default Windows GPU preference'}</p><div class="game-path">${escapeHtml(g.executable || g.installDir)}</div><p>${g.optimized ? 'The live guard can raise this executable’s CPU priority while OPlay is open. Game graphics settings remain unchanged.' : 'Optimize assigns the High performance GPU preference. You may be asked to choose the game executable so the preference reaches the correct process.'}</p><div class="dialog-actions"><button class="primary" data-game-action="launch" data-id="${escapeHtml(id)}">${icon('play')}Launch game</button>${g.optimized ? `<button class="secondary" data-game-action="undo" data-id="${escapeHtml(id)}">${icon('undo')}Undo preference</button>` : `<button class="secondary" data-game-action="optimize" data-id="${escapeHtml(id)}">${icon('spark')}Optimize game</button>`}</div>`;
+  $('#game-detail').innerHTML = `<h2>${escapeHtml(g.name)}</h2><p>${escapeHtml(g.store)} · ${g.optimized ? 'Windows High performance GPU preference selected' : 'Default Windows GPU preference'}</p><div class="game-path">${escapeHtml(g.executable || g.installDir)}</div><div class="dialog-section-title"><span>GRAPHICS PACKAGES</span><small>Installed beside this game's executable · original files backed up</small></div><div class="game-route-grid"><button class="game-route" data-install-route="mfg" data-id="${escapeHtml(id)}"><span class="route-index">01 / COMMUNITY</span><strong>Latest MFG</strong><small>Multi-frame generation modules from the latest DLSS Unlocked package</small><span class="route-link">Install package ${icon('arrow')}</span></button><button class="game-route" data-install-route="neural" data-id="${escapeHtml(id)}"><span class="route-index">02 / COMMUNITY</span><strong>DLSS neural rendering</strong><small>Neural-rendering files in the same community package</small><span class="route-link">Install package ${icon('arrow')}</span></button><button class="game-route" data-install-route="fsrfg" data-id="${escapeHtml(id)}"><span class="route-index">03 / OPTISCALER</span><strong>FSR frame generation</strong><small>Install the FSR 3 frame-generation route</small><span class="route-link">Install route ${icon('arrow')}</span></button><button class="game-route" data-install-route="fsr4" data-id="${escapeHtml(id)}"><span class="route-index">04 / OPTISCALER</span><strong>FSR 4 route</strong><small>FSR upscaling route with FSR frame generation; actual DLL version varies by package</small><span class="route-link">Install route ${icon('arrow')}</span></button></div><p class="dialog-caveat">File installation does not guarantee in-game activation. Close the game before installing. Current packages and restore points are in Graphics Studio.</p><div class="dialog-actions"><button class="primary" data-game-action="launch" data-id="${escapeHtml(id)}">${icon('play')}Launch game</button>${g.optimized ? `<button class="secondary" data-game-action="undo" data-id="${escapeHtml(id)}">${icon('undo')}Undo preference</button>` : `<button class="secondary" data-game-action="optimize" data-id="${escapeHtml(id)}">${icon('spark')}Optimize game</button>`}<button class="secondary" data-action="open-game-studio" data-id="${escapeHtml(id)}">Graphics Studio ${icon('arrow')}</button></div>`;
   if (!$('#game-dialog').open) $('#game-dialog').showModal();
 }
 async function undo(scope) {
@@ -225,6 +225,22 @@ document.addEventListener('click', e => {
   const studio = e.target.closest('[data-studio-view]'); if (studio) { studioView(studio.dataset.studioView); return; }
   const f = e.target.closest('[data-filter]'); if (f) { filter = f.dataset.filter; $$('.filter').forEach(el => el.classList.toggle('active', el === f)); renderGames(); return; }
   const detail = e.target.closest('[data-detail]'); if (detail && state) { details(detail.dataset.detail); return; }
+  const route = e.target.closest('[data-install-route]');
+  if (route) { action(async () => {
+    const gameId = route.dataset.id;
+    if (!state.games.some(g => g.id === gameId)) throw Error('Choose a library game first.');
+    const kind = route.dataset.installRoute;
+    if (kind === 'mfg' || kind === 'neural') {
+      $('#work-label').textContent = 'Downloading and installing MFG and neural-rendering files…';
+      state.components = await window.aether.components('unlocked', {gameId});
+      note('Community package installed and verified. Check the game or mod overlay for activation.');
+    } else if (kind === 'fsrfg' || kind === 'fsr4') {
+      $('#work-label').textContent = 'Installing the FSR frame-generation route…';
+      state.components = await window.aether.components('opti', {gameId, output:'fsrfg', upscaler:kind === 'fsr4' ? 'fsr31' : 'auto'});
+      note('FSR frame-generation route installed. Check the in-game overlay for activation and the actual FSR version.');
+    } else throw Error('Unknown graphics route');
+    renderState(await window.aether.snapshot());$('#component-game').value = gameId;renderStudio();details(gameId);
+  }); return; }
   const gameButton = e.target.closest('[data-game-action]');
   if (gameButton) {
     action(async () => {
@@ -241,11 +257,16 @@ document.addEventListener('click', e => {
   }
   const button = e.target.closest('[data-action]'); if (!button) return;
   if (button.dataset.action === 'close-dialog') { $('#game-dialog').close(); return; }
+  if (button.dataset.action === 'open-game-studio') { $('#component-game').value = button.dataset.id; $('#game-dialog').close(); page('components'); renderStudio(); return; }
   action(async () => {
     switch (button.dataset.action) {
       case 'theme': { const theme = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light'; document.documentElement.dataset.theme = theme; state.theme=theme; await window.aether.theme(theme); break; }
       case 'component-refresh': $('#work-label').textContent = 'Checking runtime and community releases…'; state.components = await window.aether.components('refresh'); renderStudio(); note(state.components.refreshError ? 'Release check was partial: '+state.components.refreshError : 'Runtime and community releases checked.'); break;
       case 'component-download': $('#work-label').textContent = 'Downloading and verifying runtime…'; state.components = await window.aether.components('download', {id:button.dataset.id}); renderStudio(); note('Runtime downloaded and publisher signature verified.'); break;
+      case 'component-community-download': $('#work-label').textContent = 'Downloading and verifying the MFG community package…'; state.components = await window.aether.components('download-unlocked'); renderStudio(); note('MFG, neural-rendering and bundled FSR files downloaded and verified.'); break;
+      case 'component-opti-download': $('#work-label').textContent = 'Downloading and verifying OptiScaler…'; state.components = await window.aether.components('download-opti'); renderStudio(); note('OptiScaler frame-generation package downloaded and verified.'); break;
+      case 'component-community-install': $('#work-label').textContent = 'Installing the MFG community package…'; state.components = await window.aether.components('unlocked', {gameId:$('#component-game').value}); renderStudio(); note('Community package installed. Verify activation in-game.'); break;
+      case 'component-opti-route': $('#work-label').textContent = 'Installing FSR frame-generation route…'; state.components = await window.aether.components('opti', {gameId:$('#component-game').value,output:'fsrfg',upscaler:'fsr31'}); renderStudio(); note('FSR frame-generation route installed. Verify activation and version in-game.'); break;
       case 'component-scan': await inspectSelectedGame(); break;
       case 'component-swap': { const row=button.closest('.component-row'); $('#work-label').textContent = 'Backing up and swapping runtime…'; state.components = await window.aether.components('swap', {gameId:$('#component-game').value,relative:button.dataset.relative,cacheId:row.querySelector('select').value}); renderStudio(); await inspectSelectedGame(); note('Runtime file installed and verified. Original file backed up.'); break; }
       case 'component-opti': $('#work-label').textContent = 'Downloading and installing graphics profile…'; state.components = await window.aether.components('opti', {gameId:$('#component-game').value,output:$('#mod-output').value,upscaler:$('#mod-upscaler').value}); renderStudio(); await inspectSelectedGame(); note('OptiScaler files installed. Check its in-game overlay to confirm activation.'); break;
@@ -313,11 +334,23 @@ function studioView(view) {
   for (const name of ['games','downloads','compatibility']) $('#studio-'+name).hidden = view !== name;
   $$('[data-studio-view]').forEach(b => b.classList.toggle('selected', b.dataset.studioView === view));
 }
+function renderGamePicker() {
+  const selected=state.games.find(g=>g.id===$('#component-game').value);
+  $('#game-picker-value').textContent=selected?`${selected.name} · ${selected.store}`:'Choose a game';
+  $('#game-picker-trigger').disabled=!state.games.length;
+  $('#game-picker-menu').innerHTML=state.games.map(g=>`<button type="button" class="game-picker-option" role="option" aria-selected="${g.id===selected?.id}" data-picker-game="${escapeHtml(g.id)}"><span class="picker-symbol">${icon('layers')}</span><span class="picker-option-copy"><strong>${escapeHtml(g.name)}</strong><small>${escapeHtml(g.store)}</small></span>${g.id===selected?.id?icon('check'):''}</button>`).join('');
+}
+function closeGamePicker(){ $('#game-picker-menu').hidden=true;$('#game-picker-trigger').setAttribute('aria-expanded','false');$('#game-picker').classList.remove('open'); }
+$('#game-picker-trigger').addEventListener('click',()=>{const opening=$('#game-picker-menu').hidden;$('#game-picker-menu').hidden=!opening;$('#game-picker-trigger').setAttribute('aria-expanded',String(opening));$('#game-picker').classList.toggle('open',opening);});
+$('#game-picker-menu').addEventListener('click',e=>{const option=e.target.closest('[data-picker-game]');if(!option)return;$('#component-game').value=option.dataset.pickerGame;closeGamePicker();$('#component-game').dispatchEvent(new Event('change'));$('#game-picker-trigger').focus();});
+$('#game-picker').addEventListener('keydown',e=>{if(e.key==='Escape'){closeGamePicker();$('#game-picker-trigger').focus();return;}if(!['ArrowDown','ArrowUp','Home','End','Enter',' '].includes(e.key))return;e.preventDefault();const options=[...$('#game-picker-menu').querySelectorAll('[data-picker-game]')];if(!options.length)return;if($('#game-picker-menu').hidden){$('#game-picker-trigger').click();return;}const active=document.activeElement.closest('[data-picker-game]');const index=options.indexOf(active);const next=e.key==='Home'?0:e.key==='End'?options.length-1:e.key==='ArrowUp'?(index<=0?options.length-1:index-1):e.key==='ArrowDown'?(index+1)%options.length:index;if(e.key==='Enter'||e.key===' '){(active||options.find(x=>x.getAttribute('aria-selected')==='true')||options[0]).click();return;}options[next<0?0:next].focus();});
+document.addEventListener('pointerdown',e=>{if(!$('#game-picker').contains(e.target))closeGamePicker();});
 function renderStudio() {
   if (!state) return;
   const chosen = $('#component-game').value;
   $('#component-game').innerHTML = state.games.map(g => `<option value="${escapeHtml(g.id)}">${escapeHtml(g.name)} · ${escapeHtml(g.store)}</option>`).join('');
   if (state.games.some(g => g.id === chosen)) $('#component-game').value = chosen;
+  renderGamePicker();
   const c = state.components || {catalog:[],cache:[],transactions:[]};
   const transactions = c.transactions || [];
   $('#component-backups').innerHTML = transactions.length ? transactions.map(t => `<div class="restore-item"><div><strong>${escapeHtml(t.gameName)}</strong><small>${escapeHtml(t.label)} · ${t.files.length} files · ${escapeHtml(t.status)}</small></div><button class="secondary" data-action="component-restore" data-id="${escapeHtml(t.id)}">Restore original</button></div>`).join('') : '<p class="detail-note">Your original files will appear here when you install a runtime or graphics profile.</p>';
@@ -334,6 +367,7 @@ function renderCatalog() {
   const c=state.components || {catalog:[],cache:[]}, family=$('#component-family').value;
   const records=c.catalog.filter(r=>r.kind===family);
   $('#catalog-status').textContent = c.catalog.length ? `${c.catalog.length} upstream DLL releases · ${c.cache.length} downloaded · ${c.checkedAt?'Checked '+new Date(c.checkedAt).toLocaleDateString():'Update pending'}` : 'Checking daily for upstream releases';
+  $('#community-downloads').innerHTML = `<div class="downloads-heading"><span class="eyebrow">COMMUNITY PACKAGES</span><span>Download now, install into a selected game when ready</span></div><div class="package-grid"><article class="package-card glass"><span class="tag">MFG · NEURAL · FSR DLLS</span><h3>DLSS Unlocked <small>${escapeHtml(c.community?.tag||'Release check pending')}</small></h3><p>Community MFG and neural-rendering modules, OptiScaler and bundled FSR files. Bundled versions may trail AMD's SDK.</p><div class="package-actions"><button class="secondary" data-action="component-community-download" ${!c.community||c.communityCached?'disabled':''}>${c.communityCached?'Downloaded':'Download package'}</button><button class="primary" data-action="component-community-install" ${!c.community||!$('#component-game').value?'disabled':''}>Install to game</button></div></article><article class="package-card glass"><span class="tag">FSR FRAME GENERATION</span><h3>OptiScaler <small>${escapeHtml(c.optiscaler?.version||'')}</small></h3><p>FSR 3 frame-generation output and an FSR 3 / 4 upscaling route. The game and package determine the active DLL version.</p><div class="package-actions"><button class="secondary" data-action="component-opti-download" ${c.optiCached?'disabled':''}>${c.optiCached?'Downloaded':'Download package'}</button><button class="primary" data-action="component-opti-route" ${!$('#component-game').value?'disabled':''}>Install FSR route</button></div></article></div>`;
   $('#component-catalog').innerHTML = records.length ? records.map(r => { const cached=c.cache.some(x=>x.id===r.id); return `<article class="runtime-row"><div><h3>${escapeHtml(r.label)} <span>${escapeHtml(r.version)}</span></h3><p>${cached ? 'Downloaded · publisher verified' : 'DLSS Swapper upstream catalog · signature checked on download'}</p></div><span class="runtime-size">${(r.size/1048576).toFixed(1)} MB</span><button class="secondary" data-action="component-download" data-id="${escapeHtml(r.id)}" ${cached?'disabled':''}>${icon(cached?'check':'download')}${cached?'Downloaded':'Download'}</button></article>`; }).join('') : '<div class="empty">Refresh the catalog to browse available versions.</div>';
   $('#fsr-feed').innerHTML=c.fsr?`<article class="panel glass"><span class="tag">OFFICIAL AMD SDK RELEASE</span><h3>FSR ${escapeHtml(c.fsr.upscaler||'latest')} · SDK ${escapeHtml(c.fsr.tag)}</h3><p>Frame generation ${escapeHtml(c.fsr.frameGeneration||'version unlisted')} · ${c.fsr.binaryAssets?'DLL assets listed':'No standalone DLL asset in this release'}. OPlay checks this source daily; signed game-runtime downloads appear above when the DLL catalog publishes them.</p><button class="text-button" data-action="component-fsr-docs">View official SDK release ${icon('arrow')}</button></article>`:'';
 }

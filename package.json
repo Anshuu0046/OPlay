@@ -1,6 +1,6 @@
 {
   "name": "oplay",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "description": "A local-first Windows game library with live telemetry and reversible gaming preferences",
   "main": "src/main.cjs",
   "scripts": {
@@ -40,7 +40,7 @@
       "icon": "src/assets/icon.ico"
     },
     "portable": {
-      "artifactName": "OPlay-2.2.0-Windows.exe"
+      "artifactName": "OPlay-2.3.0-Windows.exe"
     },
     "forceCodeSigning": false
   }

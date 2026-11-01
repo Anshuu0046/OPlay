@@ -18,10 +18,11 @@ async function main(){
     const archive=path.join(cache,release.name),seed=process.argv[2];
     if(seed){assert.equal(await hash(seed),release.sha256,'Provided archive does not match the current upstream release');await fs.link(path.resolve(seed),archive);}
     await components.installUnlocked(game);
+    assert.equal(components.snapshot().communityCached,true,'Community download should be visible in Runtime library');
     const transaction=components.journal[0];assert.equal(transaction.status,'installed');report.installedFiles=transaction.changes.length;
     for(const name of ['dxgi.dll','OptiScaler.ini','nvngx_dlssnr.dll',path.join('OptiScaler','dlssg_sm86','dlssg_sm86.dll')])assert.ok((await fs.stat(path.join(gameDir,name))).size>0,name+' missing');
     assert.ok(transaction.changes.length>=40,'Expected bundled modules, not only a proxy');
-    const restart=new Components(dataDir,async()=>({signature:'Valid'}));await restart.load();await restart.restore(transaction.id);
+    const restart=new Components(dataDir,async()=>({signature:'Valid'}));await restart.load();assert.equal(restart.snapshot().communityCached,true,'Downloaded package should remain visible after restart');await restart.restore(transaction.id);
     assert.deepEqual(await fs.readdir(gameDir),['FixtureGame.exe']);report.originalsRestored=true;report.passed=true;
     console.log('PASS: verified '+release.tag+', installed '+report.installedFiles+' community files into a generated fixture, reopened journal and restored the initial folder exactly.');
   }finally{
