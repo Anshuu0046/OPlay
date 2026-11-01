@@ -59,7 +59,7 @@ function transferReporter(callback,total){
 async function fetchBytes(url,max,hosts,onProgress) {
   for(let redirects=0;redirects<6;redirects++){
     const u=new URL(url);if(u.protocol!=='https:'||u.username||u.password||u.port||!hosts.has(u.hostname))throw Error('Download host is not trusted');
-    const response=await fetch(u,{redirect:'manual',signal:AbortSignal.timeout(180000),headers:{'User-Agent':'OPlay/2.5'}});
+    const response=await fetch(u,{redirect:'manual',signal:AbortSignal.timeout(180000),headers:{'User-Agent':'OPlay/2.5.1'}});
     if(response.status>=300&&response.status<400){url=new URL(response.headers.get('location'),u).href;continue;}
     if(!response.ok)throw Error('Download failed: HTTP '+response.status);
     if(Number(response.headers.get('content-length'))>max)throw Error('Download exceeds size limit');
@@ -74,7 +74,7 @@ async function fetchFile(url,destination,max,hosts,onProgress){
   try{
     for(let redirects=0;redirects<6;redirects++){
       const u=new URL(url);if(u.protocol!=='https:'||u.username||u.password||u.port||!hosts.has(u.hostname))throw Error('Download host is not trusted');
-      const response=await fetch(u,{redirect:'manual',signal:AbortSignal.timeout(15*60*1000),headers:{'User-Agent':'OPlay/2.5'}});
+      const response=await fetch(u,{redirect:'manual',signal:AbortSignal.timeout(15*60*1000),headers:{'User-Agent':'OPlay/2.5.1'}});
       if(response.status>=300&&response.status<400){url=new URL(response.headers.get('location'),u).href;continue;}
       if(!response.ok)throw Error('Download failed: HTTP '+response.status);
       if(Number(response.headers.get('content-length'))>max)throw Error('Download exceeds size limit');
@@ -175,7 +175,7 @@ class Components {
     for(const transaction of this.journal.filter(t=>t.gameId===game.id)){
       let state=transaction.status==='installed'?'installed':'restore pending',checked=0;
       if(state==='installed')for(const change of transaction.changes){
-        try{const target=await safeTarget(transaction.root,change.relative);const actual=await hash(target);if(actual!==change.after){state='modified';break;}checked++;}
+        try{const target=await safeTarget(transaction.root,change.relative);const actual=await hash(target).catch(error=>{if(error.code==='ENOENT')return null;throw error;});if(actual!==change.after){state=actual===null?'missing':'modified';break;}checked++;}
         catch(error){state=error.code==='ENOENT'?'missing':'modified';break;}
       }
       installations.push({id:transaction.id,label:transaction.label,state,files:transaction.changes.length,checked,at:transaction.at});
@@ -192,12 +192,13 @@ class Components {
     const transaction={id,gameId:game.id,gameName:game.name,root,label,at:new Date().toISOString(),status:'pending',changes:[],madeDirs};
     try{for(const change of changes){
       const target=await safeTarget(root,change.relative);const exists=await fs.stat(target).then(()=>true,e=>{if(e.code==='ENOENT')return false;throw e;});
+      if(change.source===null&&!exists)continue;
       const original=path.join(backup,String(transaction.changes.length));if(exists)await fs.copyFile(target,original);
-      transaction.changes.push({relative:change.relative,before:exists?await hash(target):null,after:await hash(change.source),backup:exists?original:null,source:change.source});
+      transaction.changes.push({relative:change.relative,before:exists?await hash(target):null,after:change.source===null?null:await hash(change.source),backup:exists?original:null,source:change.source});
     }}catch(e){for(const dir of madeDirs.reverse())await fs.rmdir(dir).catch(()=>{});await fs.rm(backup,{recursive:true,force:true});throw e;}
     this.journal.push(transaction);await saveJson(this.file,this.journal);
     try{
-      for(const c of transaction.changes){const target=await safeTarget(root,c.relative);const current=await hash(target).catch(e=>{if(e.code==='ENOENT')return null;throw e;});if(current!==c.before)throw Error('Game file changed after backup; refresh and retry');await replaceFile(c.source,target,c.after);if(await hash(target)!==c.after)throw Error('Component read-back failed');}
+      for(const c of transaction.changes){const target=await safeTarget(root,c.relative);const current=await hash(target).catch(e=>{if(e.code==='ENOENT')return null;throw e;});if(current!==c.before)throw Error('Game file changed after backup; refresh and retry');if(c.source===null)await fs.unlink(target);else await replaceFile(c.source,target,c.after);if(await hash(target).catch(e=>{if(e.code==='ENOENT')return null;throw e;})!==c.after)throw Error('Component read-back failed');}
       transaction.status='installed';await saveJson(this.file,this.journal);return this.snapshot();
     }catch(error){try{await this.restore(id);}catch(recovery){error.message+='; restore pending: '+recovery.message;}throw error;}
   }
@@ -259,6 +260,7 @@ class Components {
     set('Upscalers','Dx12Upscaler',upscaler);set('FrameGen','Enabled',output==='off'?'false':'true');set('FrameGen','FGInput',output==='off'?'nofg':scan.files.some(f=>f.kind==='dlss_g')?'dlssg':'upscaler');set('FrameGen','FGOutput',output==='off'?'nofg':output);
     await fs.writeFile(path.join(extracted,'OptiScaler.ini'),ini);
     const changes=[];for(const name of selected){const source=path.join(extracted,name);await regular(source);const targetName=name.startsWith('Licenses/')?'OPlay-OptiScaler-'+path.basename(name):name==='OptiScaler.dll'?'dxgi.dll':name;changes.push({relative:path.relative(root,path.join(dir,targetName)),source});}
+    for(const name of ['dinput8.dll','version.dll','winmm.dll'])if(!changes.some(change=>path.resolve(root,change.relative).toLowerCase()===path.join(dir,name).toLowerCase()))changes.push({relative:path.relative(root,path.join(dir,name)),source:null});
     return this.transact(game,changes,'OptiScaler '+OPTI.version+' · '+(output==='off'?'upscaling':output==='xefg'?'XeSS frame generation':'FSR frame generation'));
   }
   async downloadOpti(){
@@ -290,6 +292,7 @@ class Components {
       if(!Array.isArray(names)||!names.length)throw Error('Community archive contains no installable files');
       const changes=[];
       for(const name of names){const source=path.join(extracted,...name.split('/'));await regular(source,536870912);if(name.toLowerCase().endsWith('.dll'))await pe64(source,true);changes.push({relative:path.relative(root,path.join(dir,...name.split('/'))),source});}
+      for(const name of ['dinput8.dll','version.dll','winmm.dll'])if(!changes.some(change=>path.resolve(root,change.relative).toLowerCase()===path.join(dir,name).toLowerCase()))changes.push({relative:path.relative(root,path.join(dir,name)),source:null});
       return await this.transact(game,changes,'DLSS Unlocked '+release.tag+' · experimental MFG / neural route');
     }finally{await fs.rm(extracted,{recursive:true,force:true});}
   }

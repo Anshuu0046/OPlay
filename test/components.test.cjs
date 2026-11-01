@@ -56,6 +56,17 @@ test('restore preflights all game files before changing any of them',()=>fixture
   assert.equal(await fs.readFile(second,'utf8'),'another mod');
   assert.equal(c.journal.length,1);
 }));
+test('graphics transaction stages a conflicting proxy and restores it exactly',()=>fixture(async(c,game,dir)=>{
+  const proxy=path.join(game.installDir,'winmm.dll'),mod=path.join(game.installDir,'dxgi.dll'),source=path.join(dir,'mod.dll');
+  await fs.writeFile(proxy,'older proxy');await fs.writeFile(source,'new proxy');
+  await c.transact(game,[{relative:'dxgi.dll',source},{relative:'winmm.dll',source:null}],'graphics profile');
+  await assert.rejects(fs.stat(proxy),/ENOENT/);
+  assert.equal(await fs.readFile(mod,'utf8'),'new proxy');
+  assert.deepEqual((await c.statusGame(game)).installations.map(item=>[item.state,item.checked]),[['installed',2]]);
+  const fresh=new Components(c.directory,()=>{});await fresh.load();await fresh.restore(fresh.journal[0].id);
+  assert.equal(await fs.readFile(proxy,'utf8'),'older proxy');
+  await assert.rejects(fs.stat(mod),/ENOENT/);
+}));
 test('a staged write failure rolls back earlier writes and leaves no partial profile',()=>fixture(async(c,game,dir)=>{
   const a=path.join(game.installDir,'a.dll'),b=path.join(game.installDir,'b.dll'),source=path.join(dir,'new.dll');await fs.writeFile(a,'original-a');await fs.writeFile(b,'original-b');await fs.writeFile(source,'replacement');
   const rename=fs.rename;fs.rename=async(from,to)=>{if(path.basename(to)==='b.dll'&&path.basename(from).startsWith('.oplay-'))throw Error('injected locked game file');return rename(from,to);};

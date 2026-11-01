@@ -1,6 +1,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { observeLaunch, explain } = require('../src/launch-check.cjs');
+const fs = require('node:fs/promises');
+const os = require('node:os');
+const path = require('node:path');
+const { observeLaunch, explain, gameLogHints, watchSince, unseenCrash } = require('../src/launch-check.cjs');
 
 test('launch check distinguishes a stable process from a crash and an absent launch', async () => {
   let time = 0, polls = 0;
@@ -12,7 +15,24 @@ test('launch check distinguishes a stable process from a crash and an absent lau
   const failed = await observeLaunch({ launch: async () => {}, running: async () => ++polls < 4 ? ['Game'] : [], crashes: async () => [crash], ...clock, startTimeoutMs: 5, stableMs: 4, pollMs: 1 });
   assert.equal(failed.outcome, 'crashed');
   assert.match(explain(failed, ['dxgi.dll', 'winmm.dll']), /stack overflow.*proxy DLLs/i);
+  assert.match(explain({...failed,gpuEvents:[{id:153,provider:'nvlddmkm'}]},['dxgi.dll']),/GPU driver event.*0xc00000fd/i);
   polls = 0; time = 0;
   const absent = await observeLaunch({ launch: async () => {}, running: async () => [], crashes: async () => [], ...clock, startTimeoutMs: 3, stableMs: 2, pollMs: 1 });
   assert.equal(absent.outcome, 'not-started');
+});
+test('launch diagnosis reads recent graphics errors without loading whole logs', async()=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'oplay-launch-log-'));
+  try{
+    await fs.writeFile(path.join(dir,'OptiScaler.log'),'normal\n'+('normal filler\n'.repeat(6000))+'[E] GPU device suspended\n');
+    const hints=await gameLogHints(dir,new Date(Date.now()-1000).toISOString());
+    assert.equal(hints.length,1);assert.match(hints[0].text,/GPU device suspended/);
+  }finally{await fs.rm(dir,{recursive:true,force:true});}
+});
+test('late crash watcher ignores duplicate and old Windows reports',()=>{
+  const prior={outcome:'crashed',baseline:{outcome:'launched',finishedAt:'2026-11-01T15:00:00Z'}};
+  const since=watchSince(prior);
+  assert.equal(since,'2026-11-01T15:00:00Z');
+  const events=[{at:'2026-11-01T15:10:00Z',reportId:'seen'},{at:'2026-11-01T15:05:00Z',reportId:'new'},{at:'2026-11-01T14:59:00Z',reportId:'old'}];
+  assert.equal(unseenCrash(events,[{crash:{reportId:'seen'}}],since)?.reportId,'new');
+  assert.equal(watchSince({outcome:'crashed',finishedAt:'2026-11-01T15:20:00Z'}),null);
 });

@@ -146,6 +146,13 @@ while ($null -ne ($line=[Console]::ReadLine())) {
           @{at=$_.TimeCreated.ToUniversalTime().ToString('o'); app=[string]$_.Properties[0].Value; module=[string]$_.Properties[3].Value; code=[string]$_.Properties[6].Value; path=[string]$_.Properties[10].Value; reportId=[string]$_.Properties[12].Value}
         })
       }
+      'gpuResetEvents' {
+        $since=[datetime]::Parse([string]$q.since).ToLocalTime()
+        if($since -lt (Get-Date).AddHours(-2) -or $since -gt (Get-Date).AddMinutes(1)){throw 'Invalid launch time'}
+        $result=@(Get-WinEvent -FilterHashtable @{LogName='System';Id=153,4101;StartTime=$since} -MaxEvents 100 -ErrorAction SilentlyContinue | Where-Object { $_.ProviderName -in @('nvlddmkm','Display') } | Select-Object -First 5 | ForEach-Object {
+          @{at=$_.TimeCreated.ToUniversalTime().ToString('o');id=$_.Id;provider=$_.ProviderName;detail=([string]$_.Properties[1].Value)}
+        })
+      }
       'apps' {
         $result=@(Get-Process | Where-Object { $_.MainWindowHandle -ne 0 -and $_.Id -ne $q.owner -and $_.Id -ne $PID -and $_.ProcessName -notmatch '^(explorer|dwm|winlogon|sihost|taskmgr|StartMenuExperienceHost|SearchHost|ShellExperienceHost|TextInputHost|ApplicationFrameHost|LockApp)$' } | ForEach-Object {
           try { if($_.Path) { @{pid=$_.Id; start=$_.StartTime.ToUniversalTime().Ticks.ToString(); name=$_.ProcessName; path=$_.Path; memory=[math]::Round($_.WorkingSet64/1MB); title=$_.MainWindowTitle} } } catch { }

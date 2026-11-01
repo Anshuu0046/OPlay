@@ -12,7 +12,7 @@ const { Journal } = require('./journal.cjs');
 const { GpuControl } = require('./gpu-control.cjs');
 const { ErrorLog } = require('./error-log.cjs');
 const { Components } = require('./components.cjs');
-const { observeLaunch, explain, proxyFiles } = require('./launch-check.cjs');
+const { observeLaunch, explain, proxyFiles, gameLogHints, watchSince, unseenCrash } = require('./launch-check.cjs');
 const exec = promisify(execFile);
 const ROOT = __dirname;
 const trustedDocument = realpathSync(path.join(ROOT, 'index.html')).toLowerCase();
@@ -35,7 +35,7 @@ let folderCandidates = new Map();
 const gpuControl = new GpuControl(ROOT);
 let gpuCapability = null, powerState = null, gpuHeartbeat;
 let desktopApps = [];
-let vendorScan = null, components, componentQueue = Promise.resolve(), catalogTimer;
+let vendorScan = null, components, componentQueue = Promise.resolve(), catalogTimer, gameCrashTimer, crashPolling = false;
 const smi = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'nvidia-smi.exe');
 const dataFile = () => path.join(app.getPath('userData'), 'library.json');
 function persist() {
@@ -232,6 +232,7 @@ async function checkGameLaunch(game, rollbackOnCrash = true) {
   });
   const result = await run();
   result.gameId=game.id;result.gameName=game.name;result.proxies=proxies;
+  if(result.crash){result.gpuEvents=(await ask({action:'gpuResetEvents',since:result.startedAt}).catch(()=>[])).filter(event=>Date.parse(event.at)<=Date.parse(result.crash.at)+2000);result.logHints=await gameLogHints(game.installDir,result.startedAt);}
   result.guidance=explain(result,proxies);
   if(result.crash)errorLog.write('game-launch-crash',JSON.stringify({game:game.name,...result.crash,proxies}));
   if(result.outcome==='crashed'&&rollbackOnCrash){
@@ -251,6 +252,37 @@ async function checkGameLaunch(game, rollbackOnCrash = true) {
   }
   await components.recordLaunchTest(result);
   return components.snapshot();
+}
+async function pollRecentGameCrashes(){
+  for(const game of settings.games){
+    const prior=components.launchTests.find(item=>item.gameId===game.id);
+    const since=watchSince(prior);
+    if(!since||!Number.isFinite(Date.parse(since))||Date.now()-Date.parse(since)>90*60*1000)continue;
+    const events=await ask({action:'gameCrashEvents',root:game.installDir,since});
+    const crash=unseenCrash(events,components.launchTests,since);
+    if(!crash)continue;
+    const gpuEvents=(await ask({action:'gpuResetEvents',since}).catch(()=>[])).filter(event=>Date.parse(event.at)<=Date.parse(crash.at)+2000);
+    const result={gameId:game.id,gameName:game.name,startedAt:since,finishedAt:crash.at,outcome:'crashed',late:true,crash,proxies:prior.proxies||[],gpuEvents,logHints:await gameLogHints(game.installDir,since)};
+    result.guidance=explain(result,result.proxies);
+    errorLog.write('game-launch-crash',JSON.stringify({game:game.name,...crash,gpuEvents:result.gpuEvents}));
+    const transaction=components.journal.find(t=>t.gameId===game.id);
+    if(transaction){
+      try{
+        if((await ask({action:'gameRunning',root:game.installDir})).length)throw Error('Game process is still running');
+        const status=await components.statusGame(game);
+        if(!status.installations.some(item=>item.id===transaction.id&&item.state==='installed'))throw Error('Installed files changed after OPlay wrote them');
+        await components.restore(transaction.id);result.rollback='restored';result.guidance+=' OPlay restored its unchanged files after the crash. Use Test launch when ready to check the original profile.';
+      }catch(error){result.rollback='blocked';result.rollbackReason=error.message;result.guidance+=' Automatic restore stopped: '+error.message;errorLog.write('game-launch-rollback',error);}
+    }
+    await components.recordLaunchTest(result);
+    if(win&&!win.isDestroyed())win.webContents.send('components-updated',components.snapshot());
+  }
+}
+function scheduleGameCrashPoll(){
+  if(crashPolling)return;
+  crashPolling=true;
+  const work=componentQueue.then(pollRecentGameCrashes).catch(error=>errorLog.write('game-crash-watch',error)).finally(()=>{crashPolling=false;});
+  componentQueue=work;
 }
 function handlers() {
   bind('theme', async mode => { if (!['dark','light'].includes(mode)) throw Error('Invalid theme'); nativeTheme.themeSource = mode; settings.theme = mode; await persist(); });
@@ -468,12 +500,12 @@ app.whenReady().then(async () => {
   handlers(); await win.loadFile(path.join(ROOT, 'index.html'));
   win.show(); await sample(); timer = setInterval(() => { sample().catch(e => { runtimeNotice = e.message; errorLog.write('sampling', e); }); }, 5000);
   gpuHeartbeat = setInterval(() => { if (gpuControl.socket) gpuControl.request('state').catch(e => { runtimeNotice = e.message; errorLog.write('gpu-heartbeat', e); }); }, 5000);
-  if(!TEST){const check=()=>{const work=componentQueue.then(()=>components.refreshIfDue()).then(result=>{if(win&&!win.isDestroyed())win.webContents.send('components-updated',result);}).catch(e=>errorLog.write('catalog-refresh',e));componentQueue=work.catch(()=>{});};check();catalogTimer=setInterval(check,60*60*1000);}
+  if(!TEST){const check=()=>{const work=componentQueue.then(()=>components.refreshIfDue()).then(result=>{if(win&&!win.isDestroyed())win.webContents.send('components-updated',result);}).catch(e=>errorLog.write('catalog-refresh',e));componentQueue=work.catch(()=>{});};check();catalogTimer=setInterval(check,60*60*1000);scheduleGameCrashPoll();gameCrashTimer=setInterval(scheduleGameCrashPoll,30000);}
 }).catch(e => { errorLog.write('startup', e); dialog.showErrorBox('OPlay could not start', e.message); app.exit(1); });
 app.on('window-all-closed', () => app.quit());
 app.on('before-quit', event => {
   if (closing) return;
-  event.preventDefault(); closing = true; clearInterval(timer); clearInterval(gpuHeartbeat); clearInterval(catalogTimer);
+  event.preventDefault(); closing = true; clearInterval(timer); clearInterval(gpuHeartbeat); clearInterval(catalogTimer); clearInterval(gameCrashTimer);
   queue.then(async () => {
     await componentQueue; await diskQueue;
     // Wait for the last process sample before restoring priorities.
