@@ -1,5 +1,7 @@
 const fs = require('node:fs/promises');
-const {createReadStream} = require('node:fs');
+const {createReadStream,createWriteStream} = require('node:fs');
+const {Readable,Transform} = require('node:stream');
+const {pipeline} = require('node:stream/promises');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const os = require('node:os');
@@ -15,6 +17,9 @@ const TYPES = {
 };
 const CATALOG = 'https://beeradmoore.github.io/dlss-swapper/manifest.json';
 const OPTI = {version:'0.9.4',url:'https://github.com/optiscaler/OptiScaler/releases/download/v0.9.4/Optiscaler_0.9.4-final.20260718._MM.7z',sha256:'575cb4df866116093df75af607e37fd70e10f5163e0f23fd5c804142e80ef0ad'};
+const UNLOCKED_API='https://api.github.com/repos/ShyVortex/dlss-unlocked/releases/latest';
+const FSR_API='https://api.github.com/repos/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/releases/latest';
+const DAY=24*60*60*1000;
 const under = (root,file) => {const r=path.relative(root,file);return !!r && !r.startsWith('..'+path.sep) && r!=='..' && !path.isAbsolute(r);};
 async function hash(file,algorithm='sha256') {const h=crypto.createHash(algorithm);for await(const chunk of createReadStream(file))h.update(chunk);return h.digest('hex');}
 async function replaceFile(source,target,expectedHash) {
@@ -29,20 +34,59 @@ async function safeTarget(root,relative) {
   if(typeof relative!=='string'||path.isAbsolute(relative)||relative.includes(':')||!under(root,path.resolve(root,relative)))throw Error('Invalid component path');
   const file=path.resolve(root,relative);let current=root;
   for(const segment of path.relative(root,path.dirname(file)).split(path.sep).filter(Boolean)){current=path.join(current,segment);const s=await fs.lstat(current);if(s.isSymbolicLink()||!s.isDirectory())throw Error('Linked component directories are not supported');}
-  try{await regular(file);}catch(e){if(e.code!=='ENOENT')throw e;}
+  try{await regular(file,536870912);}catch(e){if(e.code!=='ENOENT')throw e;}
   if(!under(await fs.realpath(root),path.join(await fs.realpath(path.dirname(file)),path.basename(file))))throw Error('Component path escaped its game folder');
   return file;
+}
+async function ensureParents(root,relative,created){
+  if(typeof relative!=='string'||path.isAbsolute(relative)||relative.includes(':')||!under(root,path.resolve(root,relative)))throw Error('Invalid component path');
+  let current=root;
+  for(const part of path.relative(root,path.dirname(path.resolve(root,relative))).split(path.sep).filter(Boolean)){
+    current=path.join(current,part);
+    try{const s=await fs.lstat(current);if(!s.isDirectory()||s.isSymbolicLink())throw Error('Linked component directories are not supported');}
+    catch(e){if(e.code!=='ENOENT')throw e;await fs.mkdir(current);created.push(current);}
+  }
 }
 async function fetchBytes(url,max,hosts) {
   for(let redirects=0;redirects<6;redirects++){
     const u=new URL(url);if(u.protocol!=='https:'||u.username||u.password||u.port||!hosts.has(u.hostname))throw Error('Download host is not trusted');
-    const response=await fetch(u,{redirect:'manual',signal:AbortSignal.timeout(180000),headers:{'User-Agent':'OPlay/2.0'}});
+    const response=await fetch(u,{redirect:'manual',signal:AbortSignal.timeout(180000),headers:{'User-Agent':'OPlay/2.2'}});
     if(response.status>=300&&response.status<400){url=new URL(response.headers.get('location'),u).href;continue;}
     if(!response.ok)throw Error('Download failed: HTTP '+response.status);
     if(Number(response.headers.get('content-length'))>max)throw Error('Download exceeds size limit');
     const chunks=[];let size=0;for await(const chunk of response.body){size+=chunk.length;if(size>max)throw Error('Download exceeds size limit');chunks.push(Buffer.from(chunk));}
     return Buffer.concat(chunks);
   }throw Error('Too many download redirects');
+}
+async function fetchFile(url,destination,max,hosts){
+  const partial=destination+'.partial';await fs.rm(partial,{force:true});
+  try{
+    for(let redirects=0;redirects<6;redirects++){
+      const u=new URL(url);if(u.protocol!=='https:'||u.username||u.password||u.port||!hosts.has(u.hostname))throw Error('Download host is not trusted');
+      const response=await fetch(u,{redirect:'manual',signal:AbortSignal.timeout(15*60*1000),headers:{'User-Agent':'OPlay/2.2'}});
+      if(response.status>=300&&response.status<400){url=new URL(response.headers.get('location'),u).href;continue;}
+      if(!response.ok)throw Error('Download failed: HTTP '+response.status);
+      if(Number(response.headers.get('content-length'))>max)throw Error('Download exceeds size limit');
+      let size=0;
+      await pipeline(Readable.fromWeb(response.body),new Transform({transform(chunk,encoding,callback){size+=chunk.length;callback(size>max?Error('Download exceeds size limit'):null,chunk);}}),createWriteStream(partial,{flags:'wx'}));
+      await fs.rename(partial,destination);return size;
+    }
+    throw Error('Too many download redirects');
+  }finally{await fs.rm(partial,{force:true});}
+}
+function normalizeUnlocked(release){
+  if(!release||typeof release.tag_name!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._-]{1,59}$/.test(release.tag_name))throw Error('Unknown DLSS Unlocked release');
+  const asset=release.assets?.find(a=>typeof a.name==='string'&&/^dlss-unlocked-standalone-[A-Za-z0-9._-]+\.zip$/.test(a.name));
+  if(!asset||!Number.isSafeInteger(asset.size)||asset.size<1000000||asset.size>1073741824||!/^sha256:[a-f0-9]{64}$/i.test(asset.digest||''))throw Error('DLSS Unlocked release has no verified standalone package');
+  const url=new URL(asset.browser_download_url);
+  if(url.protocol!=='https:'||url.hostname!=='github.com'||url.username||url.password||url.port||!url.pathname.startsWith('/ShyVortex/dlss-unlocked/releases/download/'))throw Error('Unknown DLSS Unlocked download host');
+  return {tag:release.tag_name,publishedAt:release.published_at||null,name:asset.name,size:asset.size,sha256:asset.digest.slice(7).toLowerCase(),url:url.href,releaseUrl:'https://github.com/ShyVortex/dlss-unlocked/releases/tag/'+encodeURIComponent(release.tag_name)};
+}
+function normalizeFsr(release){
+  if(!release||!/^v\d+\.\d+\.\d+$/.test(release.tag_name||''))throw Error('Unknown FSR SDK release');
+  const upscaler=(release.body||'').match(/FSR[^\r\n<]{0,40}Upscaling\s*(\d+\.\d+\.\d+)/i)?.[1]||null;
+  const generation=(release.body||'').match(/FSR[^\r\n<]{0,40}Frame Generation[^\r\n<]{0,30}(\d+\.\d+\.\d+)/i)?.[1]||null;
+  return {tag:release.tag_name,publishedAt:release.published_at||null,upscaler,frameGeneration:generation,url:'https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/releases/tag/'+encodeURIComponent(release.tag_name),binaryAssets:(release.assets||[]).filter(a=>/\.dll$/i.test(a.name||'')).length};
 }
 function normalizeCatalog(manifest) {
   const records=[];
@@ -76,10 +120,19 @@ async function scanComponents(root) {
   return {root,files,risks,warnings,inspected};
 }
 class Components {
-  constructor(directory,inspect) {this.directory=directory;this.inspect=inspect;this.catalog=[];this.cache=[];this.journal=[];this.file=path.join(directory,'transactions.json');}
-  async load(){await fs.mkdir(this.directory,{recursive:true});this.catalog=await readJson(path.join(this.directory,'catalog.json'),[]);this.cache=await readJson(path.join(this.directory,'cache.json'),[]);this.journal=await readJson(this.file,[]);}
-  snapshot(){return {catalog:this.catalog,cache:this.cache.map(({file,...record})=>record),transactions:this.journal.map(({changes,...record})=>({...record,files:changes.map(({relative})=>relative)})),optiscaler:OPTI};}
-  async refresh(){const bytes=await fetchBytes(CATALOG,8000000,new Set(['beeradmoore.github.io']));this.catalog=normalizeCatalog(JSON.parse(bytes.toString('utf8')));await saveJson(path.join(this.directory,'catalog.json'),this.catalog);return this.snapshot();}
+  constructor(directory,inspect) {this.directory=directory;this.inspect=inspect;this.catalog=[];this.cache=[];this.journal=[];this.community=null;this.fsr=null;this.checkedAt=null;this.refreshError=null;this.file=path.join(directory,'transactions.json');}
+  async load(){await fs.mkdir(this.directory,{recursive:true});this.catalog=await readJson(path.join(this.directory,'catalog.json'),[]);this.cache=await readJson(path.join(this.directory,'cache.json'),[]);this.journal=await readJson(this.file,[]);const feed=await readJson(path.join(this.directory,'community.json'),{});this.community=feed.unlocked||null;this.fsr=feed.fsr||null;this.checkedAt=feed.checkedAt||null;}
+  snapshot(){return {catalog:this.catalog,cache:this.cache.map(({file,...record})=>record),transactions:this.journal.map(({changes,...record})=>({...record,files:changes.map(({relative})=>relative)})),optiscaler:OPTI,community:this.community,fsr:this.fsr,checkedAt:this.checkedAt,refreshError:this.refreshError};}
+  async refresh(){
+    const results=await Promise.allSettled([fetchBytes(CATALOG,8000000,new Set(['beeradmoore.github.io'])),fetchBytes(UNLOCKED_API,3000000,new Set(['api.github.com'])),fetchBytes(FSR_API,3000000,new Set(['api.github.com']))]);
+    const errors=[];
+    if(results[0].status==='fulfilled'){try{this.catalog=normalizeCatalog(JSON.parse(results[0].value.toString('utf8')));await saveJson(path.join(this.directory,'catalog.json'),this.catalog);}catch(e){errors.push('Runtime catalog: '+e.message);}}else errors.push('Runtime catalog: '+results[0].reason.message);
+    if(results[1].status==='fulfilled'){try{this.community=normalizeUnlocked(JSON.parse(results[1].value.toString('utf8')));}catch(e){errors.push('Community release: '+e.message);}}else errors.push('Community release: '+results[1].reason.message);
+    if(results[2].status==='fulfilled'){try{this.fsr=normalizeFsr(JSON.parse(results[2].value.toString('utf8')));}catch(e){errors.push('FSR SDK: '+e.message);}}else errors.push('FSR SDK: '+results[2].reason.message);
+    if(errors.length===3)throw Error(errors.join('; '));
+    this.checkedAt=new Date().toISOString();this.refreshError=errors.join('; ')||null;await saveJson(path.join(this.directory,'community.json'),{unlocked:this.community,fsr:this.fsr,checkedAt:this.checkedAt});return this.snapshot();
+  }
+  async refreshIfDue(){if(!this.checkedAt||!Number.isFinite(Date.parse(this.checkedAt))||Date.now()-Date.parse(this.checkedAt)>=DAY)return this.refresh();return this.snapshot();}
   async download(id){
     const record=this.catalog.find(r=>r.id===id);if(!record)throw Error('Refresh the catalog and choose a listed component');
     const cached=this.cache.find(r=>r.id===id);if(cached&&await hash(cached.file).catch(()=>null)===cached.sha256)return this.snapshot();
@@ -104,12 +157,14 @@ class Components {
     if(/(?:^|[\\/])WindowsApps(?:[\\/]|$)/i.test(root))throw Error('Protected WindowsApps packages cannot be modified; OPlay does not change their permissions');
     if(this.journal.some(t=>t.gameId===game.id))throw Error('Restore the current component profile before applying another');
     const id=crypto.randomUUID(),backup=path.join(this.directory,'backups',id);await fs.mkdir(backup,{recursive:true});
-    const transaction={id,gameId:game.id,gameName:game.name,root,label,at:new Date().toISOString(),status:'pending',changes:[]};
-    for(const change of changes){
+    const madeDirs=[];
+    try{for(const change of changes)await ensureParents(root,change.relative,madeDirs);}catch(e){for(const dir of madeDirs.reverse())await fs.rmdir(dir).catch(()=>{});throw e;}
+    const transaction={id,gameId:game.id,gameName:game.name,root,label,at:new Date().toISOString(),status:'pending',changes:[],madeDirs};
+    try{for(const change of changes){
       const target=await safeTarget(root,change.relative);const exists=await fs.stat(target).then(()=>true,e=>{if(e.code==='ENOENT')return false;throw e;});
       const original=path.join(backup,String(transaction.changes.length));if(exists)await fs.copyFile(target,original);
       transaction.changes.push({relative:change.relative,before:exists?await hash(target):null,after:await hash(change.source),backup:exists?original:null,source:change.source});
-    }
+    }}catch(e){for(const dir of madeDirs.reverse())await fs.rmdir(dir).catch(()=>{});await fs.rm(backup,{recursive:true,force:true});throw e;}
     this.journal.push(transaction);await saveJson(this.file,this.journal);
     try{
       for(const c of transaction.changes){const target=await safeTarget(root,c.relative);const current=await hash(target).catch(e=>{if(e.code==='ENOENT')return null;throw e;});if(current!==c.before)throw Error('Game file changed after backup; refresh and retry');await replaceFile(c.source,target,c.after);if(await hash(target)!==c.after)throw Error('Component read-back failed');}
@@ -117,11 +172,20 @@ class Components {
     }catch(error){try{await this.restore(id);}catch(recovery){error.message+='; restore pending: '+recovery.message;}throw error;}
   }
   async swap(game,relative,cacheId){
-    const scan=await this.inspectGame(game);if(scan.risks.length)throw Error('Component changes are blocked for detected online/anti-cheat games');
+    const scan=await this.inspectGame(game);
     const found=scan.files.find(f=>f.relative===relative),entry=this.cache.find(r=>r.id===cacheId);
     if(!found||!entry||found.kind!==entry.kind)throw Error('Choose a matching installed component and downloaded version');
     if(await hash(entry.file)!==entry.sha256)throw Error('Cached component changed; download it again');
     return this.transact(game,[{relative,source:entry.file}],entry.label+' '+entry.version);
+  }
+  async installRuntime(game,cacheId){
+    const entry=this.cache.find(r=>r.id===cacheId);
+    if(!entry||TYPES[entry.kind]?.[1]!==entry.name)throw Error('Choose a downloaded runtime file');
+    if(await hash(entry.file)!==entry.sha256)throw Error('Cached runtime changed; download it again');
+    if(!game.executable)throw Error('Choose the actual game executable first');await pe64(game.executable,true);
+    const root=await gameRoot(game.installDir),dir=path.dirname(await fs.realpath(game.executable));
+    if(dir!==root&&!under(root,dir))throw Error('Executable is outside the game folder');
+    return this.transact(game,[{relative:path.relative(root,path.join(dir,entry.name)),source:entry.file}],entry.label+' '+entry.version+' · direct file install');
   }
   async restore(id){
     const t=this.journal.find(t=>t.id===id);if(!t)throw Error('Component backup was not found');
@@ -133,13 +197,14 @@ class Components {
       if(await hash(target).catch(e=>{if(e.code==='ENOENT')return null;throw e;})!==c.before)throw Error('Restore read-back failed');
     }catch(e){failures.push(c.relative+': '+e.message);}
     if(failures.length){t.status='restore pending';await saveJson(this.file,this.journal);throw Error(failures.join('; '));}
-    this.journal=this.journal.filter(x=>x!==t);await saveJson(this.file,this.journal);return this.snapshot();
+    this.journal=this.journal.filter(x=>x!==t);await saveJson(this.file,this.journal);
+    for(const dir of [...(t.madeDirs||[])].reverse())if(under(t.root,dir))await fs.rmdir(dir).catch(()=>{});
+    return this.snapshot();
   }
   async installOpti(game,output,upscaler='auto'){
     if(!['auto','dlss','fsr31','xess'].includes(upscaler))throw Error('Unknown upscaler profile');
     if(!['off','fsrfg','xefg'].includes(output))throw Error('Choose a supported frame-generation profile');
-    const scan=await this.inspectGame(game);if(scan.risks.length)throw Error('OptiScaler is blocked for detected online/anti-cheat games');
-    if(!scan.files.some(f=>['dlss','xess','fsr_31_dx12'].includes(f.kind)))throw Error('No supported upscaler input found; OptiScaler cannot add missing engine motion vectors');
+    const scan=await this.inspectGame(game);
     if(!game.executable)throw Error('Choose the actual game executable before installing OptiScaler');await pe64(game.executable,true);
     const root=scan.root,dir=path.dirname(await fs.realpath(game.executable));if(dir!==root&&!under(root,dir))throw Error('Executable is outside the game folder');
     const cache=path.join(this.directory,'optiscaler',OPTI.version);await fs.mkdir(cache,{recursive:true});const archive=path.join(cache,'package.7z');
@@ -156,8 +221,26 @@ class Components {
     set('Upscalers','Dx12Upscaler',upscaler);set('FrameGen','Enabled',output==='off'?'false':'true');set('FrameGen','FGInput',output==='off'?'nofg':scan.files.some(f=>f.kind==='dlss_g')?'dlssg':'upscaler');set('FrameGen','FGOutput',output==='off'?'nofg':output);
     await fs.writeFile(path.join(extracted,'OptiScaler.ini'),ini);
     const changes=[];for(const name of selected){const source=path.join(extracted,name);await regular(source);const targetName=name.startsWith('Licenses/')?'OPlay-OptiScaler-'+path.basename(name):name==='OptiScaler.dll'?'dxgi.dll':name;changes.push({relative:path.relative(root,path.join(dir,targetName)),source});}
-    if(await fs.stat(path.join(dir,'dxgi.dll')).then(()=>true,()=>false))throw Error('An existing dxgi.dll proxy was found; restore or remove that mod first');
     return this.transact(game,changes,'OptiScaler '+OPTI.version+' · '+(output==='off'?'upscaling':output==='xefg'?'XeSS frame generation':'FSR frame generation'));
   }
+  async installUnlocked(game){
+    const release=this.community;if(!release)throw Error('Refresh the community release feed first');
+    if(!game.executable)throw Error('Choose the actual game executable first');await pe64(game.executable,true);
+    const root=await gameRoot(game.installDir),dir=path.dirname(await fs.realpath(game.executable));
+    if(dir!==root&&!under(root,dir))throw Error('Executable is outside the game folder');
+    const cache=path.join(this.directory,'unlocked',release.sha256);await fs.mkdir(cache,{recursive:true});const archive=path.join(cache,release.name);
+    if(await hash(archive).catch(()=>null)!==release.sha256){await fs.rm(archive,{force:true});await fetchFile(release.url,archive,1073741824,new Set(['github.com','release-assets.githubusercontent.com','objects.githubusercontent.com']));}
+    if(await hash(archive)!==release.sha256)throw Error('Community release checksum differs');
+    const extracted=await fs.mkdtemp(path.join(cache,'extract-'));
+    try{
+      const script=path.join(__dirname,'component-tools.ps1').replace(/app\.asar([\\/])/,'app.asar.unpacked$1');
+      const result=await exec(path.join(process.env.SystemRoot,'System32/WindowsPowerShell/v1.0/powershell.exe'),['-NoProfile','-File',script,'-Action','ExtractBundle','-File',archive,'-Destination',extracted],{windowsHide:true,timeout:240000,maxBuffer:200000});
+      const names=JSON.parse(result.stdout);
+      if(!Array.isArray(names)||!names.length)throw Error('Community archive contains no installable files');
+      const changes=[];
+      for(const name of names){const source=path.join(extracted,...name.split('/'));await regular(source,536870912);if(name.toLowerCase().endsWith('.dll'))await pe64(source,true);changes.push({relative:path.relative(root,path.join(dir,...name.split('/'))),source});}
+      return await this.transact(game,changes,'DLSS Unlocked '+release.tag+' · experimental MFG / neural route');
+    }finally{await fs.rm(extracted,{recursive:true,force:true});}
+  }
 }
-module.exports={Components,TYPES,normalizeCatalog,scanComponents,safeTarget,fetchBytes,hash,pe64};
+module.exports={Components,TYPES,normalizeCatalog,normalizeUnlocked,normalizeFsr,scanComponents,safeTarget,fetchBytes,fetchFile,hash,pe64};

@@ -244,11 +244,15 @@ document.addEventListener('click', e => {
   action(async () => {
     switch (button.dataset.action) {
       case 'theme': { const theme = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light'; document.documentElement.dataset.theme = theme; state.theme=theme; await window.aether.theme(theme); break; }
-      case 'component-refresh': $('#work-label').textContent = 'Refreshing the runtime catalog…'; state.components = await window.aether.components('refresh'); renderStudio(); note('Runtime catalog refreshed.'); break;
+      case 'component-refresh': $('#work-label').textContent = 'Checking runtime and community releases…'; state.components = await window.aether.components('refresh'); renderStudio(); note(state.components.refreshError ? 'Release check was partial: '+state.components.refreshError : 'Runtime and community releases checked.'); break;
       case 'component-download': $('#work-label').textContent = 'Downloading and verifying runtime…'; state.components = await window.aether.components('download', {id:button.dataset.id}); renderStudio(); note('Runtime downloaded and publisher signature verified.'); break;
       case 'component-scan': await inspectSelectedGame(); break;
-      case 'component-swap': { const row=button.closest('.component-row'); $('#work-label').textContent = 'Backing up and swapping runtime…'; state.components = await window.aether.components('swap', {gameId:$('#component-game').value,relative:button.dataset.relative,cacheId:row.querySelector('select').value,offline:$('#component-offline').checked}); renderStudio(); await inspectSelectedGame(); note('Runtime swapped and verified. Original file backed up.'); break; }
-      case 'component-opti': $('#work-label').textContent = 'Downloading and installing graphics profile…'; state.components = await window.aether.components('opti', {gameId:$('#component-game').value,output:$('#mod-output').value,upscaler:$('#mod-upscaler').value,offline:$('#component-offline').checked}); renderStudio(); await inspectSelectedGame(); note('OptiScaler profile installed. Restart the game and open its Insert overlay to verify compatibility.'); break;
+      case 'component-swap': { const row=button.closest('.component-row'); $('#work-label').textContent = 'Backing up and swapping runtime…'; state.components = await window.aether.components('swap', {gameId:$('#component-game').value,relative:button.dataset.relative,cacheId:row.querySelector('select').value}); renderStudio(); await inspectSelectedGame(); note('Runtime file installed and verified. Original file backed up.'); break; }
+      case 'component-opti': $('#work-label').textContent = 'Downloading and installing graphics profile…'; state.components = await window.aether.components('opti', {gameId:$('#component-game').value,output:$('#mod-output').value,upscaler:$('#mod-upscaler').value}); renderStudio(); await inspectSelectedGame(); note('OptiScaler files installed. Check its in-game overlay to confirm activation.'); break;
+      case 'component-unlocked': $('#work-label').textContent = 'Downloading and installing the community package…'; state.components = await window.aether.components('unlocked', {gameId:$('#component-game').value}); renderStudio(); await inspectSelectedGame(); note('Community package files installed and verified. Check the game and mod overlay for activation.'); break;
+      case 'component-force-runtime': $('#work-label').textContent = 'Backing up and installing runtime file…'; state.components = await window.aether.components('force-runtime', {gameId:$('#component-game').value,cacheId:$('#force-runtime-select').value}); renderStudio(); await inspectSelectedGame(); note('Runtime file installed beside the game executable. Check whether the game loads it.'); break;
+      case 'component-unlocked-docs': await window.aether.unlockedDocs(); break;
+      case 'component-fsr-docs': await window.aether.fsrDocs(); break;
       case 'component-restore': $('#work-label').textContent = 'Restoring original game files…'; state.components = await window.aether.components('restore', {id:button.dataset.id}); renderStudio(); note('Original game files restored and verified.'); break;
       case 'component-docs': await window.aether.componentDocs(); break;
       case 'vendor-open': { const r = await window.aether.vendorScan('Navigate'); renderState(r.state); note('NVIDIA Performance panel opened.'); break; }
@@ -301,6 +305,7 @@ document.addEventListener('keydown', e => {
 $('#search').addEventListener('input', renderGames); $('#store-filter').addEventListener('change', renderGames);
 $('#game-dialog').addEventListener('click', e => { if (e.target === $('#game-dialog')) { const r = e.target.getBoundingClientRect(); if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) e.target.close(); } });
 window.aether.onTelemetry(renderTelemetry);
+window.aether.onComponents(next => { if(state){state.components=next;renderStudio();} });
 window.aether.snapshot().then(s => { renderState(s); note('Library synchronized.'); }).catch(e => note('Could not read the library: ' + e.message, true));
 
 let inspectedGame = null;
@@ -316,14 +321,21 @@ function renderStudio() {
   const c = state.components || {catalog:[],cache:[],transactions:[]};
   const transactions = c.transactions || [];
   $('#component-backups').innerHTML = transactions.length ? transactions.map(t => `<div class="restore-item"><div><strong>${escapeHtml(t.gameName)}</strong><small>${escapeHtml(t.label)} · ${t.files.length} files · ${escapeHtml(t.status)}</small></div><button class="secondary" data-action="component-restore" data-id="${escapeHtml(t.id)}">Restore original</button></div>`).join('') : '<p class="detail-note">Your original files will appear here when you install a runtime or graphics profile.</p>';
+  const selectedRuntime=$('#force-runtime-select').value;
+  $('#force-runtime-select').innerHTML=c.cache.length?c.cache.map(r=>`<option value="${escapeHtml(r.id)}">${escapeHtml(r.label)} · ${escapeHtml(r.version)}</option>`).join(''):'<option value="">Download a runtime first</option>';
+  if(c.cache.some(r=>r.id===selectedRuntime))$('#force-runtime-select').value=selectedRuntime;
+  $('#force-runtime-install').disabled=!c.cache.length||!$('#component-game').value;
+  const unlocked=c.community;$('#unlocked-version').textContent=unlocked?.tag||'Check releases';$('#unlocked-install').disabled=!unlocked||!$('#component-game').value;
+  $('#unlocked-status').textContent=unlocked?`${(unlocked.size/1048576).toFixed(0)} MB download · Checked ${c.checkedAt?new Date(c.checkedAt).toLocaleString():'previously'}${c.refreshError?' · '+c.refreshError:''}`:'Refresh the catalog to find the latest package. Download is roughly 600 MB; install size is larger.';
   renderCatalog(); renderComponentResults(); renderCompatibility();
 }
 function renderCatalog() {
   if (!state) return;
   const c=state.components || {catalog:[],cache:[]}, family=$('#component-family').value;
   const records=c.catalog.filter(r=>r.kind===family);
-  $('#catalog-status').textContent = c.catalog.length ? `${c.catalog.length} curated releases · ${c.cache.length} downloaded` : 'Refresh to load the upstream catalog';
+  $('#catalog-status').textContent = c.catalog.length ? `${c.catalog.length} upstream DLL releases · ${c.cache.length} downloaded · ${c.checkedAt?'Checked '+new Date(c.checkedAt).toLocaleDateString():'Update pending'}` : 'Checking daily for upstream releases';
   $('#component-catalog').innerHTML = records.length ? records.map(r => { const cached=c.cache.some(x=>x.id===r.id); return `<article class="runtime-row"><div><h3>${escapeHtml(r.label)} <span>${escapeHtml(r.version)}</span></h3><p>${cached ? 'Downloaded · publisher verified' : 'DLSS Swapper upstream catalog · signature checked on download'}</p></div><span class="runtime-size">${(r.size/1048576).toFixed(1)} MB</span><button class="secondary" data-action="component-download" data-id="${escapeHtml(r.id)}" ${cached?'disabled':''}>${icon(cached?'check':'download')}${cached?'Downloaded':'Download'}</button></article>`; }).join('') : '<div class="empty">Refresh the catalog to browse available versions.</div>';
+  $('#fsr-feed').innerHTML=c.fsr?`<article class="panel glass"><span class="tag">OFFICIAL AMD SDK RELEASE</span><h3>FSR ${escapeHtml(c.fsr.upscaler||'latest')} · SDK ${escapeHtml(c.fsr.tag)}</h3><p>Frame generation ${escapeHtml(c.fsr.frameGeneration||'version unlisted')} · ${c.fsr.binaryAssets?'DLL assets listed':'No standalone DLL asset in this release'}. OPlay checks this source daily; signed game-runtime downloads appear above when the DLL catalog publishes them.</p><button class="text-button" data-action="component-fsr-docs">View official SDK release ${icon('arrow')}</button></article>`:'';
 }
 async function inspectSelectedGame() {
   if (!$('#component-game').value) throw Error('Add a game to your library first.');
@@ -334,22 +346,19 @@ async function inspectSelectedGame() {
 function renderComponentResults() {
   if (!inspectedGame || inspectedGame.gameId !== $('#component-game').value) { $('#component-results').innerHTML = '<div class="empty compact">Inspect this game to see its installed graphics components.</div>'; return; }
   const c=state.components || {cache:[]};
-  $('#component-results').innerHTML = (inspectedGame.risks.length ? `<div class="component-risk">Online / anti-cheat indicators detected. Runtime changes and mod installation are blocked for this game.</div>` : '') + (inspectedGame.files.length ? inspectedGame.files.map(f=> { const versions=c.cache.filter(r=>r.kind===f.kind);return `<div class="component-row"><div><strong>${escapeHtml(f.label)}</strong><small>Installed ${escapeHtml(f.version || 'version unreported')}</small><small>${escapeHtml(f.relative)}</small></div><select aria-label="Version for ${escapeHtml(f.label)}" ${versions.length?'':'disabled'}>${versions.length ? versions.map(v=>`<option value="${escapeHtml(v.id)}">${escapeHtml(v.version)}</option>`).join(''):'<option>Download a version first</option>'}</select><button class="secondary" data-action="component-swap" data-relative="${escapeHtml(f.relative)}" ${versions.length&&!inspectedGame.risks.length?'':'disabled'}>Swap version</button></div>`; }).join('') : '<div class="empty compact">No DLSS, FSR or XeSS runtime found in this game. Swapping cannot add an upscaler to a game that lacks its engine inputs.</div>') + inspectedGame.warnings.map(w=>`<p class="detail-note">${escapeHtml(w)}</p>`).join('');
+  $('#component-results').innerHTML = (inspectedGame.files.length ? inspectedGame.files.map(f=> { const versions=c.cache.filter(r=>r.kind===f.kind);return `<div class="component-row"><div><strong>${escapeHtml(f.label)}</strong><small>Installed ${escapeHtml(f.version || 'version unreported')}</small><small>${escapeHtml(f.relative)}</small></div><select aria-label="Version for ${escapeHtml(f.label)}" ${versions.length?'':'disabled'}>${versions.length ? versions.map(v=>`<option value="${escapeHtml(v.id)}">${escapeHtml(v.version)}</option>`).join(''):'<option>Download a version first</option>'}</select><button class="secondary" data-action="component-swap" data-relative="${escapeHtml(f.relative)}" ${versions.length?'':'disabled'}>Swap version</button></div>`; }).join('') : '<div class="empty compact">No existing DLSS, FSR or XeSS runtime was found. You can still install the experimental community package above.</div>') + inspectedGame.warnings.map(w=>`<p class="detail-note">${escapeHtml(w)}</p>`).join('');
 }
 function renderCompatibility() {
-  const gpuName=telemetry?.gpu?.name || state?.inventory?.graphics?.find(n=>/RTX|Radeon|Arc/i.test(n)) || '';
-  const generation=Number(gpuName.match(/RTX\s*(\d{2})\d{2}/i)?.[1]);
-  const rtx=Number.isFinite(generation)&&generation>=20, fg=generation>=40, mfg=generation>=50;
   const cards=[
-    ['DLSS Super Resolution',rtx?'RTX GPU detected':'Game + RTX required',rtx,'Swap existing DLSS runtimes and test newer reconstruction models in games that already integrate DLSS.'],
-    ['Frame generation',fg?'Native FG hardware':'Community route','limited',fg?'Native DLSS FG hardware detected. Game integration is still required.':'Native DLSS FG is not supported on this GPU. OptiScaler offers game-dependent FSR / XeSS alternatives.'],
-    ['Multi-frame generation',mfg?'Native MFG hardware':'Native RTX 50 required',mfg,'A DLL replacement alone does not enable native NVIDIA MFG. Community plugins have separate requirements; no universal unlock is assumed.'],
-    ['DLSS 5 neural rendering',mfg?'Vendor-supported hardware':'No native support',mfg,'Needs supported hardware, game integration and neural-rendering components. Experimental third-party screen-processing models are not bundled.'],
-    ['FSR 4',/RX\s*9\d{3}/i.test(gpuName)?'Eligible Radeon GPU':'GPU + runtime dependent','limited','FSR 4 requires its matching runtime and supported GPU path. Other GPUs can use compatible FSR 3 / XeSS routes instead.'],
-    ['Your originals, kept safe','Restore profiles',true,'Each installation saves original files and verifies every write. Restore preserves files changed later by a game update or another mod.']
+    ['DLSS / FSR / XeSS DLLs','Version library',true,'Download current signed runtime files and swap or directly add a selected DLL.'],
+    ['OptiScaler','Install profile',true,'Install a DX12 proxy and select DLSS, FSR or XeSS output.'],
+    ['Multi-frame generation','Community package','limited','Install the current DLSS Unlocked MFG modules beside a game executable. Confirm the loaded path in-game.'],
+    ['Neural rendering','Community package','limited','Install the upstream neural-rendering forwarder and model files. Game execution determines whether they activate.'],
+    ['FSR 4.1.2','Track upstream','limited','AMD SDK 2.4 publishes FSR 4.1.2; available binaries and actual operation depend on the selected package and game.'],
+    ['Original files','Restore points',true,'Every changed file is backed up and verified. Restore preserves later changes made by other software.']
   ];
   $('#compatibility-cards').innerHTML=cards.map(([name,status,available,description])=>`<article class="compatibility-card glass"><span class="status-tag ${available===true?'available':available==='limited'?'limited':''}">${escapeHtml(status)}</span><h3>${escapeHtml(name)}</h3><p>${escapeHtml(description)}</p></article>`).join('');
 }
 $('#component-family').addEventListener('change',renderCatalog);
-$('#component-game').addEventListener('change',()=>{ $('#component-offline').checked=false; renderComponentResults(); });
+$('#component-game').addEventListener('change',()=>{ renderComponentResults(); renderStudio(); });
 

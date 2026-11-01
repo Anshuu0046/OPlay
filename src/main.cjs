@@ -34,7 +34,7 @@ let folderCandidates = new Map();
 const gpuControl = new GpuControl(ROOT);
 let gpuCapability = null, powerState = null, gpuHeartbeat;
 let desktopApps = [];
-let vendorScan = null, components, componentQueue = Promise.resolve();
+let vendorScan = null, components, componentQueue = Promise.resolve(), catalogTimer;
 const smi = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'nvidia-smi.exe');
 const dataFile = () => path.join(app.getPath('userData'), 'library.json');
 function persist() {
@@ -214,8 +214,10 @@ async function chooseExe(game) {
 function handlers() {
   bind('theme', async mode => { if (!['dark','light'].includes(mode)) throw Error('Invalid theme'); nativeTheme.themeSource = mode; settings.theme = mode; await persist(); });
   bind('component-docs', () => shell.openExternal('https://github.com/optiscaler/OptiScaler/wiki/Installation')); 
+  bind('unlocked-docs', () => shell.openExternal('https://github.com/ShyVortex/dlss-unlocked/releases'));
+  bind('fsr-docs', () => shell.openExternal('https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/releases'));
   bind('components', (operation, payload = {}) => {
-    if (!['refresh','download','inspect','swap','opti','restore'].includes(operation) || !payload || typeof payload !== 'object') throw Error('Invalid component operation');
+    if (!['refresh','download','inspect','swap','force-runtime','opti','unlocked','restore'].includes(operation) || !payload || typeof payload !== 'object') throw Error('Invalid component operation');
     if (TEST && operation !== 'inspect') throw Error('Mutations are disabled in test mode');
     const work = componentQueue.then(async () => {
       if (operation === 'refresh') return components.refresh();
@@ -225,8 +227,9 @@ function handlers() {
       const running = await ask({ action: 'gameRunning', root: game.installDir });
       if (running.length) throw Error('Close the game before changing components: ' + running.join(', '));
       if (operation === 'restore') return components.restore(payload.id);
-      if (payload.offline !== true) throw Error('Confirm that this is an offline game and is closed before installing components');
       if (operation === 'swap') return components.swap(game, payload.relative, payload.cacheId);
+      if (operation === 'force-runtime') return components.installRuntime(game, payload.cacheId);
+      if (operation === 'unlocked') return components.installUnlocked(game);
       return components.installOpti(game, payload.output, payload.upscaler);
     });
     componentQueue = work.catch(() => {}); return work;
@@ -415,11 +418,12 @@ app.whenReady().then(async () => {
   handlers(); await win.loadFile(path.join(ROOT, 'index.html'));
   win.show(); await sample(); timer = setInterval(() => { sample().catch(e => { runtimeNotice = e.message; errorLog.write('sampling', e); }); }, 5000);
   gpuHeartbeat = setInterval(() => { if (gpuControl.socket) gpuControl.request('state').catch(e => { runtimeNotice = e.message; errorLog.write('gpu-heartbeat', e); }); }, 5000);
+  if(!TEST){const check=()=>{const work=componentQueue.then(()=>components.refreshIfDue()).then(result=>{if(win&&!win.isDestroyed())win.webContents.send('components-updated',result);}).catch(e=>errorLog.write('catalog-refresh',e));componentQueue=work.catch(()=>{});};check();catalogTimer=setInterval(check,60*60*1000);}
 }).catch(e => { errorLog.write('startup', e); dialog.showErrorBox('OPlay could not start', e.message); app.exit(1); });
 app.on('window-all-closed', () => app.quit());
 app.on('before-quit', event => {
   if (closing) return;
-  event.preventDefault(); closing = true; clearInterval(timer); clearInterval(gpuHeartbeat);
+  event.preventDefault(); closing = true; clearInterval(timer); clearInterval(gpuHeartbeat); clearInterval(catalogTimer);
   queue.then(async () => {
     await componentQueue; await diskQueue;
     // Wait for the last process sample before restoring priorities.

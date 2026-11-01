@@ -4,6 +4,8 @@ contextBridge.exposeInMainWorld('aether', {
   openLogs: () => ipcRenderer.invoke('open-logs'),
   theme: mode => ipcRenderer.invoke('theme', mode),
   componentDocs: () => ipcRenderer.invoke('component-docs'),
+  unlockedDocs: () => ipcRenderer.invoke('unlocked-docs'),
+  fsrDocs: () => ipcRenderer.invoke('fsr-docs'),
   components: (operation, payload) => ipcRenderer.invoke('components', operation, payload),
   snapshot: () => ipcRenderer.invoke('snapshot'),
   gpuEnable: () => ipcRenderer.invoke('gpu-enable'),
@@ -25,5 +27,6 @@ contextBridge.exposeInMainWorld('aether', {
   undo: scope => ipcRenderer.invoke('undo', scope),
   openSettings: target => ipcRenderer.invoke('open-settings', target),
   window: action => ipcRenderer.invoke('window', action),
-  onTelemetry: callback => { const listener = (_event, value) => callback(value); ipcRenderer.on('telemetry', listener); return () => ipcRenderer.removeListener('telemetry', listener); }
+  onTelemetry: callback => { const listener = (_event, value) => callback(value); ipcRenderer.on('telemetry', listener); return () => ipcRenderer.removeListener('telemetry', listener); },
+  onComponents: callback => { const listener = (_event, value) => callback(value); ipcRenderer.on('components-updated', listener); return () => ipcRenderer.removeListener('components-updated', listener); }
 });

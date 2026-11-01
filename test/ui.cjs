@@ -42,6 +42,9 @@ async function main() {
     await page.locator('.rail-item[data-page="components"]').click();
     assert.equal(await page.locator('#page-components').isVisible(), true);
     assert.equal(await page.locator('.compatibility-card').count(), 6);
+    assert.equal(await page.locator('#force-runtime-install').isVisible(), true);
+    assert.equal(await page.locator('#force-runtime-install').isDisabled(), true, 'No runtime is cached in the isolated profile');
+    assert.equal(await page.locator('#unlocked-install').isVisible(), true);
     await page.locator('[data-studio-view="downloads"]').click();
     assert.equal(await page.locator('#studio-downloads').isVisible(), true);
     await page.locator('[data-studio-view="compatibility"]').click();
@@ -50,7 +53,11 @@ async function main() {
     await page.evaluate(()=>document.querySelector('#toast').classList.remove('visible'));
     await page.screenshot({path:path.resolve(__dirname,'../../../outputs/OPlay-graphics-preview.png'),fullPage:true});
     await page.locator('[data-studio-view="games"]').click();
+    await page.locator('#page-components').evaluate(el=>Promise.all(el.getAnimations({subtree:true}).map(a=>a.finished.catch(()=>{}))));
+    await page.screenshot({path:path.resolve(__dirname,'../../../outputs/OPlay-graphics-profiles-preview.png'),fullPage:true});
     await assert.rejects(page.evaluate(()=>window.aether.components('swap',{gameId:'invalid'})), /disabled in test mode/);
+    await assert.rejects(page.evaluate(()=>window.aether.components('unlocked',{gameId:'invalid'})), /disabled in test mode/);
+    await assert.rejects(page.evaluate(()=>window.aether.components('force-runtime',{gameId:'invalid'})), /disabled in test mode/);
     await page.locator('[data-action="theme"]').click();
     await page.waitForFunction(()=>document.documentElement.dataset.theme==='light');
     await page.locator('.rail-item[data-page="library"]').click();
