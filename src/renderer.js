@@ -51,7 +51,10 @@ function renderDownloadProgress(progress) {
     else{bar.removeAttribute('value');$('#download-percent').textContent='Downloading';$('#download-detail').textContent=`${(bytes/1048576).toFixed(1)} MB downloaded`;}
   } else if(progress.phase==='connecting') {bar.removeAttribute('value');$('#download-percent').textContent='Connecting';$('#download-detail').textContent='Opening the verified source';}
   else if(progress.phase==='verifying') {bar.removeAttribute('value');$('#download-percent').textContent='Verifying';$('#download-detail').textContent='Checking the downloaded package';}
-  else if(progress.phase==='complete') {bar.value=100;$('#download-percent').textContent='Done';$('#download-detail').textContent='Download or installation completed';downloadHideTimer=setTimeout(()=>tray.hidden=true,7000);}
+  else if(progress.phase==='launching') {bar.removeAttribute('value');$('#download-percent').textContent='Launching';$('#download-detail').textContent='Waiting for the game process and Windows crash events';}
+  else if(progress.phase==='observing') {bar.removeAttribute('value');$('#download-percent').textContent='Checking';$('#download-detail').textContent='Watching game startup for 25 seconds';}
+  else if(progress.phase==='rollback') {bar.removeAttribute('value');$('#download-percent').textContent='Restoring';$('#download-detail').textContent='A crash was recorded. Restoring OPlay-managed files';}
+  else if(progress.phase==='complete') {bar.value=100;$('#download-percent').textContent='Done';$('#download-detail').textContent='Operation completed. See the game launch result';downloadHideTimer=setTimeout(()=>tray.hidden=true,7000);}
   else if(progress.phase==='failed') {bar.removeAttribute('value');$('#download-percent').textContent='Stopped';$('#download-detail').textContent='Download or installation failed. See the message above.';downloadHideTimer=setTimeout(()=>tray.hidden=true,12000);}
 }
 window.aether.onComponentProgress(renderDownloadProgress);
@@ -155,6 +158,9 @@ function renderState(next) {
   $('#backups').innerHTML = state.entries.length ? state.entries.map(e => `<div class="backup-row"><strong>${escapeHtml(e.name)}</strong><small>${escapeHtml(e.path)}</small><div class="backup-value">Before: ${escapeHtml(e.before.exists ? JSON.stringify(e.before.value) : 'not set')} → OPlay: ${escapeHtml(JSON.stringify(e.after.value))}</div><small>${escapeHtml(new Date(e.time).toLocaleString())} · ${escapeHtml(e.scope)}</small></div>`).join('') : '<h3>No settings to undo.</h3><p>When OPlay changes a Windows setting, its original value appears here. Settings that already match need no backup.</p>';
   $('#scan-warnings').innerHTML = (state.warnings || []).slice(0, 20).map(w => `<p class="warning">${escapeHtml(w)}</p>`).join('');
   $('#data-path').textContent = 'Library and settings journal: ' + state.dataPath + ' · Offline manifests are kept visible; rescan does not delete your library.';
+  if(!$('#launch-history'))$('#page-activity .diagnostics').insertAdjacentHTML('afterend','<div class="panel glass launch-history" id="launch-history"></div>');
+  const checks=(state.components?.launchTests||[]).slice(0,12);
+  $('#launch-history').innerHTML='<h3>Game launch checks</h3><p class="detail-note">Startup checks and Windows crash events stay on this PC.</p>'+(checks.length?checks.map(item=>`<div class="launch-history-row"><div><strong>${escapeHtml(item.gameName)}</strong><small>${escapeHtml(new Date(item.finishedAt).toLocaleString())} · ${escapeHtml(item.outcome)}${item.crash?' · '+escapeHtml(item.crash.module)+' · 0x'+escapeHtml(item.crash.code):''}</small><p>${escapeHtml(item.guidance||'')}</p></div></div>`).join(''):'<p class="detail-note">No game launch checks recorded yet.</p>');
 }
 function renderScan(scan) {
   if (!scan) { $('#scan-status').textContent = 'NVIDIA calibration status unavailable.'; return; }
@@ -227,12 +233,29 @@ function renderTelemetry(next) {
 function details(id) {
   const g = state.games.find(g => g.id === id); if (!g) return;
   dialogGame = id;
-  $('#game-detail').innerHTML = `<h2>${escapeHtml(g.name)}</h2><p>${escapeHtml(g.store)} · ${g.optimized ? 'Windows High performance GPU preference selected' : 'Default Windows GPU preference'}</p><div class="game-path">${escapeHtml(g.executable || g.installDir)}</div><div id="game-install-status" class="game-install-status" aria-live="polite"></div><div class="dialog-section-title"><span>GRAPHICS PACKAGES</span><small>Installed beside this game's executable · original files backed up</small></div><div class="game-route-grid"><button class="game-route" data-install-route="mfg" data-id="${escapeHtml(id)}"><span class="route-index">01 / COMMUNITY</span><strong>Latest MFG</strong><small>Multi-frame generation modules from the latest DLSS Unlocked package</small><span class="route-link">Install package ${icon('arrow')}</span></button><button class="game-route" data-install-route="neural" data-id="${escapeHtml(id)}"><span class="route-index">02 / COMMUNITY</span><strong>DLSS neural rendering</strong><small>Neural-rendering files in the same community package</small><span class="route-link">Install package ${icon('arrow')}</span></button><button class="game-route" data-install-route="fsrfg" data-id="${escapeHtml(id)}"><span class="route-index">03 / OPTISCALER</span><strong>FSR frame generation</strong><small>Install the FSR 3 frame-generation route</small><span class="route-link">Install route ${icon('arrow')}</span></button><button class="game-route" data-install-route="fsr4" data-id="${escapeHtml(id)}"><span class="route-index">04 / OPTISCALER</span><strong>FSR 4 route</strong><small>FSR upscaling route with FSR frame generation; actual DLL version varies by package</small><span class="route-link">Install route ${icon('arrow')}</span></button></div><p class="dialog-caveat">File installation does not guarantee in-game activation. Close the game before installing. Current packages and restore points are in Graphics Studio.</p><div class="dialog-actions"><button class="primary" data-game-action="launch" data-id="${escapeHtml(id)}">${icon('play')}Launch game</button>${g.optimized ? `<button class="secondary" data-game-action="undo" data-id="${escapeHtml(id)}">${icon('undo')}Undo preference</button>` : `<button class="secondary" data-game-action="optimize" data-id="${escapeHtml(id)}">${icon('spark')}Optimize game</button>`}<button class="secondary" data-action="open-game-studio" data-id="${escapeHtml(id)}">Graphics Studio ${icon('arrow')}</button></div>`;
+  $('#game-detail').innerHTML = `<h2>${escapeHtml(g.name)}</h2><p>${escapeHtml(g.store)} · ${g.optimized ? 'Windows High performance GPU preference selected' : 'Default Windows GPU preference'}</p><div class="game-path">${escapeHtml(g.executable || g.installDir)}</div><div id="game-install-status" class="game-install-status" aria-live="polite"></div><div class="dialog-section-title"><span>GRAPHICS PACKAGES</span><small>Installed beside this game's executable · original files backed up</small></div><div class="game-route-grid"><button class="game-route" data-install-route="mfg" data-id="${escapeHtml(id)}"><span class="route-index">01 / COMMUNITY</span><strong>Latest MFG</strong><small>Multi-frame generation modules from the latest DLSS Unlocked package</small><span class="route-link">Install package ${icon('arrow')}</span></button><button class="game-route" data-install-route="neural" data-id="${escapeHtml(id)}"><span class="route-index">02 / COMMUNITY</span><strong>DLSS neural rendering</strong><small>Neural-rendering files in the same community package</small><span class="route-link">Install package ${icon('arrow')}</span></button><button class="game-route" data-install-route="fsrfg" data-id="${escapeHtml(id)}"><span class="route-index">03 / OPTISCALER</span><strong>FSR frame generation</strong><small>Install the FSR 3 frame-generation route</small><span class="route-link">Install route ${icon('arrow')}</span></button><button class="game-route" data-install-route="fsr4" data-id="${escapeHtml(id)}"><span class="route-index">04 / OPTISCALER</span><strong>FSR 4 route</strong><small>FSR upscaling route with FSR frame generation; actual DLL version varies by package</small><span class="route-link">Install route ${icon('arrow')}</span></button></div><p class="dialog-caveat">File installation does not guarantee in-game activation. Close the game before installing. OPlay will launch it after installation to check startup. Current packages and restore points are in Graphics Studio.</p><div class="dialog-actions"><button class="primary" data-game-action="launch" data-id="${escapeHtml(id)}">${icon('play')}Launch game</button>${g.optimized ? `<button class="secondary" data-game-action="undo" data-id="${escapeHtml(id)}">${icon('undo')}Undo preference</button>` : `<button class="secondary" data-game-action="optimize" data-id="${escapeHtml(id)}">${icon('spark')}Optimize game</button>`}<button class="secondary" data-action="open-game-studio" data-id="${escapeHtml(id)}">Graphics Studio ${icon('arrow')}</button></div>`;
+  $('#game-install-status').insertAdjacentHTML('afterend','<div id="game-launch-test" class="launch-test" aria-live="polite"></div>');
+  $('#game-detail .dialog-actions').insertAdjacentHTML('beforeend',`<button class="secondary" data-game-action="test" data-id="${escapeHtml(id)}">Test launch</button>`);
   if (!$('#game-dialog').open) $('#game-dialog').showModal();
   renderRecordedInstallation(id);
+  renderLaunchTest(id);
   if((state.components?.transactions||[]).some(t=>t.gameId===id))refreshInstallStatus(id);
 }
 let statusSequence=0;
+function launchTestMessage(gameId){
+  const result=(state.components?.launchTests||[]).find(item=>item.gameId===gameId);
+  if(!result)return 'No automatic launch check recorded yet. A graphics install now starts the game and watches startup.';
+  const time=new Date(result.finishedAt).toLocaleString();
+  const title=result.outcome==='launched'?'Started for 25 seconds':result.outcome==='crashed'?'Windows crash recorded':result.outcome==='not-started'?'No process appeared':'Game ended during startup';
+  const crash=result.crash?`<small>Windows event: ${escapeHtml(new Date(result.crash.at).toLocaleString())} · ${escapeHtml(result.crash.app)} · ${escapeHtml(result.crash.module)} · 0x${escapeHtml(result.crash.code)}</small>`:'';
+  const rollback=result.rollback==='restored'?`<small>OPlay package restored. Second check: ${escapeHtml(result.baseline?.outcome||'unavailable')}.</small>`:result.rollback==='blocked'?`<small>Automatic restore blocked: ${escapeHtml(result.rollbackReason)}</small>`:'';
+  return `<strong>${escapeHtml(title)}</strong><small>Checked ${escapeHtml(time)}</small>${crash}${rollback}<p>${escapeHtml(result.guidance)}</p>`;
+}
+function renderLaunchTest(gameId){
+  if(dialogGame===gameId&&$('#game-dialog').open)$('#game-launch-test').innerHTML=launchTestMessage(gameId);
+  if($('#component-game').value===gameId&&$('#component-launch-test'))$('#component-launch-test').innerHTML=launchTestMessage(gameId);
+}
+function launchNote(gameId){const result=(state.components?.launchTests||[]).find(item=>item.gameId===gameId);return result?.outcome==='crashed'?(result.repaired?'Crash detected; OPlay restored its files and the game passed a second startup check.':'Crash detected. See launch diagnosis in game details.'):'Launch check: '+(result?.outcome==='launched'?'game process stayed open for 25 seconds.':'startup was not confirmed. See game details.');}
 function statusLabel(value){return value==='installed'?'Installed · files verified':value==='missing'?'Missing files':value==='modified'?'Files changed':'Restore pending';}
 function installationMarkup(installations){
   if(!installations.length)return '<span class="install-empty">No OPlay graphics package installed for this game.</span>';
@@ -289,11 +312,11 @@ document.addEventListener('click', e => {
     if (kind === 'mfg' || kind === 'neural') {
       $('#work-label').textContent = 'Downloading and installing MFG and neural-rendering files…';
       state.components = await window.aether.components('unlocked', {gameId});
-      note('Community package installed and verified. Check the game or mod overlay for activation.');
+      note(launchNote(gameId));
     } else if (kind === 'fsrfg' || kind === 'fsr4') {
       $('#work-label').textContent = 'Installing the FSR frame-generation route…';
       state.components = await window.aether.components('opti', {gameId, output:'fsrfg', upscaler:kind === 'fsr4' ? 'fsr31' : 'auto'});
-      note('FSR frame-generation route installed. Check the in-game overlay for activation and the actual FSR version.');
+      note(launchNote(gameId));
     } else throw Error('Unknown graphics route');
     renderState(await window.aether.snapshot());$('#component-game').value = gameId;renderStudio();details(gameId);
   }); return; }
@@ -302,6 +325,7 @@ document.addEventListener('click', e => {
     action(async () => {
       const id = gameButton.dataset.id;
       if (gameButton.dataset.gameAction === 'launch') note(await window.aether.launch(id));
+      else if(gameButton.dataset.gameAction==='test'){ $('#game-dialog').close();state.components=await window.aether.components('test-launch',{gameId:id});renderState(await window.aether.snapshot());details(id);note(launchNote(id)); }
       else if (gameButton.dataset.gameAction === 'undo') { await undo(id); details(id); }
       else {
         if (state.games.find(g => g.id === id)?.optimized) { details(id); return; }
@@ -321,13 +345,14 @@ document.addEventListener('click', e => {
       case 'component-download': $('#work-label').textContent = 'Downloading and verifying runtime…'; state.components = await window.aether.components('download', {id:button.dataset.id}); renderStudio(); note('Runtime downloaded and publisher signature verified.'); break;
       case 'component-community-download': $('#work-label').textContent = 'Downloading and verifying the MFG community package…'; state.components = await window.aether.components('download-unlocked'); renderStudio(); note('MFG, neural-rendering and bundled FSR files downloaded and verified.'); break;
       case 'component-opti-download': $('#work-label').textContent = 'Downloading and verifying OptiScaler…'; state.components = await window.aether.components('download-opti'); renderStudio(); note('OptiScaler frame-generation package downloaded and verified.'); break;
-      case 'component-community-install': $('#work-label').textContent = 'Installing the MFG community package…'; state.components = await window.aether.components('unlocked', {gameId:$('#component-game').value}); renderStudio(); note('Community package installed. Verify activation in-game.'); break;
-      case 'component-opti-route': $('#work-label').textContent = 'Installing FSR frame-generation route…'; state.components = await window.aether.components('opti', {gameId:$('#component-game').value,output:'fsrfg',upscaler:'fsr31'}); renderStudio(); note('FSR frame-generation route installed. Verify activation and version in-game.'); break;
+      case 'component-community-install': $('#work-label').textContent = 'Installing and testing MFG…'; state.components = await window.aether.components('unlocked', {gameId:$('#component-game').value}); renderStudio(); note(launchNote($('#component-game').value)); break;
+      case 'component-opti-route': $('#work-label').textContent = 'Installing and testing FSR route…'; state.components = await window.aether.components('opti', {gameId:$('#component-game').value,output:'fsrfg',upscaler:'fsr31'}); renderStudio(); note(launchNote($('#component-game').value)); break;
       case 'component-scan': await inspectSelectedGame(); break;
-      case 'component-swap': { const row=button.closest('.component-row'); $('#work-label').textContent = 'Backing up and swapping runtime…'; state.components = await window.aether.components('swap', {gameId:$('#component-game').value,relative:button.dataset.relative,cacheId:row.querySelector('select').value}); renderStudio(); await inspectSelectedGame(); note('Runtime file installed and verified. Original file backed up.'); break; }
-      case 'component-opti': $('#work-label').textContent = 'Downloading and installing graphics profile…'; state.components = await window.aether.components('opti', {gameId:$('#component-game').value,output:$('#mod-output').value,upscaler:$('#mod-upscaler').value}); renderStudio(); await inspectSelectedGame(); note('OptiScaler files installed. Check its in-game overlay to confirm activation.'); break;
-      case 'component-unlocked': $('#work-label').textContent = 'Downloading and installing the community package…'; state.components = await window.aether.components('unlocked', {gameId:$('#component-game').value}); renderStudio(); await inspectSelectedGame(); note('Community package files installed and verified. Check the game and mod overlay for activation.'); break;
-      case 'component-force-runtime': $('#work-label').textContent = 'Backing up and installing runtime file…'; state.components = await window.aether.components('force-runtime', {gameId:$('#component-game').value,cacheId:$('#force-runtime-select').value}); renderStudio(); await inspectSelectedGame(); note('Runtime file installed beside the game executable. Check whether the game loads it.'); break;
+      case 'component-swap': { const row=button.closest('.component-row'); $('#work-label').textContent = 'Backing up, swapping and testing runtime…'; state.components = await window.aether.components('swap', {gameId:$('#component-game').value,relative:button.dataset.relative,cacheId:row.querySelector('select').value}); renderStudio(); await inspectSelectedGame(); note(launchNote($('#component-game').value)); break; }
+      case 'component-opti': $('#work-label').textContent = 'Installing and testing graphics profile…'; state.components = await window.aether.components('opti', {gameId:$('#component-game').value,output:$('#mod-output').value,upscaler:$('#mod-upscaler').value}); renderStudio(); await inspectSelectedGame(); note(launchNote($('#component-game').value)); break;
+      case 'component-unlocked': $('#work-label').textContent = 'Installing and testing the community package…'; state.components = await window.aether.components('unlocked', {gameId:$('#component-game').value}); renderStudio(); await inspectSelectedGame(); note(launchNote($('#component-game').value)); break;
+      case 'component-force-runtime': $('#work-label').textContent = 'Installing and testing runtime file…'; state.components = await window.aether.components('force-runtime', {gameId:$('#component-game').value,cacheId:$('#force-runtime-select').value}); renderStudio(); await inspectSelectedGame(); note(launchNote($('#component-game').value)); break;
+      case 'component-test-launch': state.components=await window.aether.components('test-launch',{gameId:$('#component-game').value});renderStudio();note(launchNote($('#component-game').value));break;
       case 'component-unlocked-docs': await window.aether.unlockedDocs(); break;
       case 'component-fsr-docs': await window.aether.fsrDocs(); break;
       case 'component-restore': $('#work-label').textContent = 'Restoring original game files…'; state.components = await window.aether.components('restore', {id:button.dataset.id}); renderStudio(); note('Original game files restored and verified.'); break;
@@ -411,6 +436,9 @@ function renderStudio() {
   const transactions = c.transactions || [];
   const active=transactions.find(t=>t.gameId===$('#component-game').value);
   renderRecordedInstallation($('#component-game').value);
+  if(!$('#component-launch-test'))$('#component-installed').insertAdjacentHTML('afterend','<div class="launch-check-panel"><button class="secondary" data-action="component-test-launch">Test game launch</button><div id="component-launch-test" class="launch-test" aria-live="polite"></div></div>');
+  $('[data-action="component-test-launch"]').disabled=!$('#component-game').value;
+  renderLaunchTest($('#component-game').value);
   if(transactions.some(t=>t.gameId===$('#component-game').value))refreshInstallStatus($('#component-game').value);
   $('#component-backups').innerHTML = transactions.length ? transactions.map(t => `<div class="restore-item" data-install-id="${escapeHtml(t.id)}"><div><strong>${escapeHtml(t.gameName)}</strong><small>${escapeHtml(t.label)} · ${t.files.length} files · <span class="restore-item-state">${t.status==='installed'?'Checking files':escapeHtml(t.status)}</span></small></div><button class="secondary" data-action="component-restore" data-id="${escapeHtml(t.id)}">Restore original</button></div>`).join('') : '<p class="detail-note">Your original files will appear here when you install a runtime or graphics profile.</p>';
   const selectedRuntime=$('#force-runtime-select').value;

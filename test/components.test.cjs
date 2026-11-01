@@ -45,6 +45,17 @@ test('restore preserves externally updated files and keeps the original backup',
   const target=path.join(game.installDir,'nvngx_dlss.dll'),source=path.join(dir,'new.dll');await fs.writeFile(target,'original');await fs.writeFile(source,'replacement');await c.transact(game,[{relative:'nvngx_dlss.dll',source}],'runtime');await fs.writeFile(target,'game update');
   await assert.rejects(c.restore(c.journal[0].id),/Changed outside/);assert.equal(await fs.readFile(target,'utf8'),'game update');assert.equal(await fs.readFile(c.journal[0].changes[0].backup,'utf8'),'original');
 }));
+test('restore preflights all game files before changing any of them',()=>fixture(async(c,game,dir)=>{
+  const first=path.join(game.installDir,'first.dll'),second=path.join(game.installDir,'second.dll');
+  const source=path.join(dir,'new.dll');await fs.writeFile(source,'mod');
+  await fs.writeFile(first,'first original');await fs.writeFile(second,'second original');
+  await c.transact(game,[{relative:'first.dll',source},{relative:'second.dll',source}],'two files');
+  await fs.writeFile(second,'another mod');
+  await assert.rejects(c.restore(c.journal[0].id),/Restore stopped before changing game files/);
+  assert.equal(await fs.readFile(first,'utf8'),'mod');
+  assert.equal(await fs.readFile(second,'utf8'),'another mod');
+  assert.equal(c.journal.length,1);
+}));
 test('a staged write failure rolls back earlier writes and leaves no partial profile',()=>fixture(async(c,game,dir)=>{
   const a=path.join(game.installDir,'a.dll'),b=path.join(game.installDir,'b.dll'),source=path.join(dir,'new.dll');await fs.writeFile(a,'original-a');await fs.writeFile(b,'original-b');await fs.writeFile(source,'replacement');
   const rename=fs.rename;fs.rename=async(from,to)=>{if(path.basename(to)==='b.dll'&&path.basename(from).startsWith('.oplay-'))throw Error('injected locked game file');return rename(from,to);};

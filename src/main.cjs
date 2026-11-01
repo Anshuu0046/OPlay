@@ -12,6 +12,7 @@ const { Journal } = require('./journal.cjs');
 const { GpuControl } = require('./gpu-control.cjs');
 const { ErrorLog } = require('./error-log.cjs');
 const { Components } = require('./components.cjs');
+const { observeLaunch, explain, proxyFiles } = require('./launch-check.cjs');
 const exec = promisify(execFile);
 const ROOT = __dirname;
 const trustedDocument = realpathSync(path.join(ROOT, 'index.html')).toLowerCase();
@@ -211,15 +212,55 @@ async function chooseExe(game) {
   if (!path.win32.isAbsolute(exe) || !/\.exe$/i.test(exe) || !(await fs.stat(exe)).isFile()) throw Error('Choose an existing .exe file');
   return exe;
 }
+async function launchTarget(game) {
+  if (/^uplay:\/\/launch\/\d+\/0$/.test(game.launch) || /^steam:\/\/rungameid\/\d+$/.test(game.launch) || /^com\.epicgames\.launcher:\/\/apps\/[^\s]+$/.test(game.launch)) await shell.openExternal(game.launch);
+  else {
+    if (!path.win32.isAbsolute(game.launch) || !/\.exe$/i.test(game.launch)) throw Error('Invalid launch target');
+    const error = await shell.openPath(game.launch); if (error) throw Error(error);
+  }
+  game.lastLaunched = new Date().toISOString(); await persist();
+}
+async function checkGameLaunch(game, rollbackOnCrash = true) {
+  if (!game.launch) throw Error('Choose a game executable before testing launch');
+  if ((await ask({action:'gameRunning',root:game.installDir})).length) throw Error('Close the game before running a launch check');
+  const proxies = await proxyFiles(game.installDir);
+  const run = () => observeLaunch({
+    launch: () => launchTarget(game),
+    running: () => ask({action:'gameRunning',root:game.installDir}),
+    crashes: since => ask({action:'gameCrashEvents',root:game.installDir,since}),
+    onUpdate: phase => {if(win&&!win.isDestroyed())win.webContents.send('component-progress',{label:game.name,phase});}
+  });
+  const result = await run();
+  result.gameId=game.id;result.gameName=game.name;result.proxies=proxies;
+  result.guidance=explain(result,proxies);
+  if(result.crash)errorLog.write('game-launch-crash',JSON.stringify({game:game.name,...result.crash,proxies}));
+  if(result.outcome==='crashed'&&rollbackOnCrash){
+    const transaction=components.journal.find(t=>t.gameId===game.id);
+    if(transaction){
+      try {
+        const status=await components.statusGame(game);
+        if(!status.installations.some(item=>item.id===transaction.id&&item.state==='installed'))throw Error('Installed files changed after OPlay wrote them');
+        if((await ask({action:'gameRunning',root:game.installDir})).length)throw Error('Game process is still running');
+        if(win&&!win.isDestroyed())win.webContents.send('component-progress',{label:game.name,phase:'rollback'});
+        await components.restore(transaction.id);result.rollback='restored';
+        result.baseline=await run();
+        result.repaired=result.baseline.outcome==='launched';
+        result.guidance+=result.repaired?' OPlay restored its package and the game stayed open in a second startup check.':' OPlay restored its package, but the second launch did not pass the startup check. Inspect the remaining mods and game logs.';
+      } catch(error){result.rollback='blocked';result.rollbackReason=error.message;result.guidance+=' Automatic restore stopped: '+error.message;errorLog.write('game-launch-rollback',error);}
+    }
+  }
+  await components.recordLaunchTest(result);
+  return components.snapshot();
+}
 function handlers() {
   bind('theme', async mode => { if (!['dark','light'].includes(mode)) throw Error('Invalid theme'); nativeTheme.themeSource = mode; settings.theme = mode; await persist(); });
   bind('component-docs', () => shell.openExternal('https://github.com/optiscaler/OptiScaler/wiki/Installation')); 
   bind('unlocked-docs', () => shell.openExternal('https://github.com/ShyVortex/dlss-unlocked/releases'));
   bind('fsr-docs', () => shell.openExternal('https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/releases'));
   bind('components', (operation, payload = {}) => {
-    if (!['refresh','download','download-opti','download-unlocked','inspect','status','swap','force-runtime','opti','unlocked','restore'].includes(operation) || !payload || typeof payload !== 'object') throw Error('Invalid component operation');
+    if (!['refresh','download','download-opti','download-unlocked','inspect','status','swap','force-runtime','opti','unlocked','restore','test-launch'].includes(operation) || !payload || typeof payload !== 'object') throw Error('Invalid component operation');
     if (TEST && !['inspect','status'].includes(operation)) throw Error('Mutations are disabled in test mode');
-    const transferOperation=['download','download-opti','download-unlocked','opti','unlocked'].includes(operation);
+    const transferOperation=['download','download-opti','download-unlocked','opti','unlocked','swap','force-runtime','test-launch'].includes(operation);
     const work = componentQueue.then(async () => {
       if (operation === 'refresh') return components.refresh();
       if (operation === 'download') return components.download(payload.id);
@@ -228,6 +269,7 @@ function handlers() {
       if (operation === 'inspect') return components.inspectGame(getGame(payload.gameId));
       if (operation === 'status') return components.statusGame(getGame(payload.gameId));
       const game = operation === 'restore' ? getGame(components.journal.find(t => t.id === payload.id)?.gameId) : getGame(payload.gameId);
+      if(operation==='test-launch')return checkGameLaunch(game);
       if (['force-runtime','opti','unlocked'].includes(operation) && (!game.executable || !await fs.stat(game.executable).then(s => s.isFile()).catch(() => false))) {
         const executable = await chooseExe(game);
         if (!executable) throw Error('Game executable selection cancelled');
@@ -238,10 +280,11 @@ function handlers() {
       const running = await ask({ action: 'gameRunning', root: game.installDir });
       if (running.length) throw Error('Close the game before changing components: ' + running.join(', '));
       if (operation === 'restore') return components.restore(payload.id);
-      if (operation === 'swap') return components.swap(game, payload.relative, payload.cacheId);
-      if (operation === 'force-runtime') return components.installRuntime(game, payload.cacheId);
-      if (operation === 'unlocked') return components.installUnlocked(game);
-      return components.installOpti(game, payload.output, payload.upscaler);
+      if (operation === 'swap') await components.swap(game, payload.relative, payload.cacheId);
+      else if (operation === 'force-runtime') await components.installRuntime(game, payload.cacheId);
+      else if (operation === 'unlocked') await components.installUnlocked(game);
+      else await components.installOpti(game, payload.output, payload.upscaler);
+      return checkGameLaunch(game);
     });
     const reported=work.then(result=>{if(transferOperation&&win&&!win.isDestroyed())win.webContents.send('component-progress',{phase:'complete'});return result;},error=>{if(transferOperation&&win&&!win.isDestroyed())win.webContents.send('component-progress',{phase:'failed'});throw error;});
     componentQueue = reported.catch(() => {}); return reported;
@@ -345,12 +388,7 @@ function handlers() {
     const g = getGame(id);
     if (components.journal.some(t=>t.gameId===id&&t.status!=='installed')) throw Error('Restore the incomplete graphics profile in Graphics Studio before launching this game');
     if (!g.launch) { const executable = await chooseExe(g); if (!executable) return 'Launch cancelled'; g.executable = executable; g.launch = executable; await persist(); }
-    if (/^uplay:\/\/launch\/\d+\/0$/.test(g.launch) || /^steam:\/\/rungameid\/\d+$/.test(g.launch) || /^com\.epicgames\.launcher:\/\/apps\/[^\s]+$/.test(g.launch)) await shell.openExternal(g.launch);
-    else {
-      if (!path.win32.isAbsolute(g.launch) || !/\.exe$/i.test(g.launch)) throw Error('Invalid launch target');
-      const error = await shell.openPath(g.launch); if (error) throw Error(error);
-    }
-    g.lastLaunched = new Date().toISOString(); await persist(); return 'Launch request sent to ' + g.name;
+    await launchTarget(g); return 'Launch request sent to ' + g.name;
   }, true);
   bind('optimize-game', async id => {
     const g = getGame(id);

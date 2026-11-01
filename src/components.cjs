@@ -59,7 +59,7 @@ function transferReporter(callback,total){
 async function fetchBytes(url,max,hosts,onProgress) {
   for(let redirects=0;redirects<6;redirects++){
     const u=new URL(url);if(u.protocol!=='https:'||u.username||u.password||u.port||!hosts.has(u.hostname))throw Error('Download host is not trusted');
-    const response=await fetch(u,{redirect:'manual',signal:AbortSignal.timeout(180000),headers:{'User-Agent':'OPlay/2.4'}});
+    const response=await fetch(u,{redirect:'manual',signal:AbortSignal.timeout(180000),headers:{'User-Agent':'OPlay/2.5'}});
     if(response.status>=300&&response.status<400){url=new URL(response.headers.get('location'),u).href;continue;}
     if(!response.ok)throw Error('Download failed: HTTP '+response.status);
     if(Number(response.headers.get('content-length'))>max)throw Error('Download exceeds size limit');
@@ -74,7 +74,7 @@ async function fetchFile(url,destination,max,hosts,onProgress){
   try{
     for(let redirects=0;redirects<6;redirects++){
       const u=new URL(url);if(u.protocol!=='https:'||u.username||u.password||u.port||!hosts.has(u.hostname))throw Error('Download host is not trusted');
-      const response=await fetch(u,{redirect:'manual',signal:AbortSignal.timeout(15*60*1000),headers:{'User-Agent':'OPlay/2.4'}});
+      const response=await fetch(u,{redirect:'manual',signal:AbortSignal.timeout(15*60*1000),headers:{'User-Agent':'OPlay/2.5'}});
       if(response.status>=300&&response.status<400){url=new URL(response.headers.get('location'),u).href;continue;}
       if(!response.ok)throw Error('Download failed: HTTP '+response.status);
       if(Number(response.headers.get('content-length'))>max)throw Error('Download exceeds size limit');
@@ -133,11 +133,12 @@ async function scanComponents(root) {
   return {root,files,risks,warnings,inspected};
 }
 class Components {
-  constructor(directory,inspect,onProgress=()=>{}) {this.directory=directory;this.inspect=inspect;this.onProgress=onProgress;this.catalog=[];this.cache=[];this.journal=[];this.community=null;this.fsr=null;this.checkedAt=null;this.refreshError=null;this.file=path.join(directory,'transactions.json');}
+  constructor(directory,inspect,onProgress=()=>{}) {this.directory=directory;this.inspect=inspect;this.onProgress=onProgress;this.catalog=[];this.cache=[];this.journal=[];this.launchTests=[];this.community=null;this.fsr=null;this.checkedAt=null;this.refreshError=null;this.file=path.join(directory,'transactions.json');}
   progress(label,phase,received=0,total=null){this.onProgress({label,phase,received,total});}
-  async load(){await fs.mkdir(this.directory,{recursive:true});this.catalog=await readJson(path.join(this.directory,'catalog.json'),[]);this.cache=await readJson(path.join(this.directory,'cache.json'),[]);this.journal=await readJson(this.file,[]);const feed=await readJson(path.join(this.directory,'community.json'),{});this.community=feed.unlocked||null;this.fsr=feed.fsr||null;this.checkedAt=feed.checkedAt||null;await this.checkPackageCache();}
+  async load(){await fs.mkdir(this.directory,{recursive:true});this.catalog=await readJson(path.join(this.directory,'catalog.json'),[]);this.cache=await readJson(path.join(this.directory,'cache.json'),[]);this.journal=await readJson(this.file,[]);this.launchTests=await readJson(path.join(this.directory,'launch-tests.json'),[]);const feed=await readJson(path.join(this.directory,'community.json'),{});this.community=feed.unlocked||null;this.fsr=feed.fsr||null;this.checkedAt=feed.checkedAt||null;await this.checkPackageCache();}
   async checkPackageCache(){this.communityCached=!!this.community&&await fs.access(path.join(this.directory,'unlocked',this.community.sha256,this.community.name)).then(()=>true,()=>false);this.optiCached=await fs.access(path.join(this.directory,'optiscaler',OPTI.version,'package.7z')).then(()=>true,()=>false);}
-  snapshot(){return {catalog:this.catalog,cache:this.cache.map(({file,...record})=>record),transactions:this.journal.map(({changes,...record})=>({...record,files:changes.map(({relative})=>relative)})),optiscaler:OPTI,community:this.community,communityCached:!!this.communityCached,optiCached:!!this.optiCached,fsr:this.fsr,checkedAt:this.checkedAt,refreshError:this.refreshError};}
+  snapshot(){return {catalog:this.catalog,cache:this.cache.map(({file,...record})=>record),transactions:this.journal.map(({changes,...record})=>({...record,files:changes.map(({relative})=>relative)})),launchTests:this.launchTests,optiscaler:OPTI,community:this.community,communityCached:!!this.communityCached,optiCached:!!this.optiCached,fsr:this.fsr,checkedAt:this.checkedAt,refreshError:this.refreshError};}
+  async recordLaunchTest(result){this.launchTests=[result,...this.launchTests].slice(0,40);await saveJson(path.join(this.directory,'launch-tests.json'),this.launchTests);return this.snapshot();}
   async refresh(){
     const results=await Promise.allSettled([fetchBytes(CATALOG,8000000,new Set(['beeradmoore.github.io'])),fetchBytes(UNLOCKED_API,3000000,new Set(['api.github.com'])),fetchBytes(FSR_API,3000000,new Set(['api.github.com']))]);
     const errors=[];
@@ -218,6 +219,16 @@ class Components {
   }
   async restore(id){
     const t=this.journal.find(t=>t.id===id);if(!t)throw Error('Component backup was not found');
+    // Check the entire transaction before touching any file. A later game update
+    // or another mod must not leave a half-restored profile.
+    const conflicts=[];
+    for(const c of t.changes){
+      try{const target=await safeTarget(t.root,c.relative);const current=await hash(target).catch(e=>{if(e.code==='ENOENT')return null;throw e;});
+        if(current!==c.before&&current!==c.after)conflicts.push(c.relative+': Changed outside OPlay');
+        else if(current===c.after&&c.backup&&await hash(c.backup)!==c.before)conflicts.push(c.relative+': original backup hash differs');
+      }catch(e){conflicts.push(c.relative+': '+e.message);}
+    }
+    if(conflicts.length)throw Error('Restore stopped before changing game files: '+conflicts.join('; '));
     const failures=[];
     for(const c of [...t.changes].reverse())try{
       const target=await safeTarget(t.root,c.relative);const current=await hash(target).catch(e=>{if(e.code==='ENOENT')return null;throw e;});

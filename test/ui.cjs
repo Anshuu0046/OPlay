@@ -40,6 +40,7 @@ async function main() {
       assert.equal(await page.locator('#game-dialog .game-route').count(), 4);
       assert.ok((await page.locator('#game-install-status').innerText()).includes('No OPlay graphics package installed'));
       assert.equal(await page.locator('#game-dialog [data-game-action="optimize"],#game-dialog [data-game-action="undo"]').count(), 1);
+      assert.equal(await page.locator('#game-dialog [data-game-action="test"]').count(), 1);
       await page.screenshot({path:path.resolve(__dirname,'../../../outputs/OPlay-game-actions-preview.png')});
       await page.keyboard.press('Escape');
     }
@@ -50,6 +51,7 @@ async function main() {
     assert.equal(await page.locator('#force-runtime-install').isDisabled(), true, 'No runtime is cached in the isolated profile');
     assert.equal(await page.locator('#unlocked-install').isVisible(), true);
     assert.ok((await page.locator('#component-installed').innerText()).includes('No OPlay graphics package installed'));
+    assert.equal(await page.locator('[data-action="component-test-launch"]').count(), 1);
     if(state.games.length)assert.deepEqual((await page.evaluate(id=>window.aether.components('status',{gameId:id}),state.games[0].id)).installations,[]);
     await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].webContents.send('component-progress',{label:'DLSS Unlocked test package',phase:'downloading',received:5242880,total:10485760}));
     await page.waitForSelector('#download-tray:not([hidden])');
@@ -66,6 +68,11 @@ async function main() {
     await page.locator('.game-picker-option').last().click();
     assert.equal(await page.locator('#game-picker-menu').isVisible(), false);
     assert.equal(await page.locator('#component-game').inputValue(), state.games.at(-1).id);
+    await page.evaluate(id=>{state.components.launchTests=[{gameId:id,finishedAt:'2026-11-01T15:14:22Z',outcome:'crashed',crash:{at:'2026-11-01T15:14:22Z',app:'Game.exe',module:'KERNELBASE.dll',code:'c00000fd'},rollback:'restored',baseline:{outcome:'launched'},guidance:'A graphics proxy conflict is likely.'}];renderStudio();},state.games.at(-1).id);
+    assert.match(await page.locator('#component-launch-test').innerText(),/Windows crash recorded.*KERNELBASE.dll.*0xc00000fd.*Second check: launched/s);
+    await page.screenshot({path:path.resolve(__dirname,'../../../outputs/OPlay-launch-diagnosis-preview.png')});
+    await page.evaluate(()=>renderState(state));
+    assert.match(await page.locator('#launch-history').innerText(),/Game launch checks.*KERNELBASE.dll.*0xc00000fd/s);
     await page.locator('#game-picker-trigger').focus(); await page.keyboard.press('ArrowDown');
     assert.equal(await page.locator('#game-picker-menu').isVisible(), true);
     await page.keyboard.press('Escape'); assert.equal(await page.locator('#game-picker-menu').isVisible(), false);
