@@ -38,6 +38,23 @@ function note(message, error = false) {
   events.unshift({ time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), message });
   events.splice(30); renderEvents();
 }
+let downloadHideTimer;
+function renderDownloadProgress(progress) {
+  if (!progress || typeof progress.phase !== 'string') return;
+  const tray=$('#download-tray'),bar=$('#download-progress');
+  clearTimeout(downloadHideTimer);tray.hidden=false;
+  tray.dataset.phase=progress.phase;
+  if(progress.label)$('#download-title').textContent=progress.label;
+  const bytes=Number(progress.received)||0,total=Number(progress.total)||0;
+  if(progress.phase==='downloading'){
+    if(total>0){const percent=Math.min(100,Math.floor(bytes/total*100));bar.value=percent;$('#download-percent').textContent=percent+'%';$('#download-detail').textContent=`${(bytes/1048576).toFixed(1)} of ${(total/1048576).toFixed(1)} MB downloaded`;}
+    else{bar.removeAttribute('value');$('#download-percent').textContent='Downloading';$('#download-detail').textContent=`${(bytes/1048576).toFixed(1)} MB downloaded`;}
+  } else if(progress.phase==='connecting') {bar.removeAttribute('value');$('#download-percent').textContent='Connecting';$('#download-detail').textContent='Opening the verified source';}
+  else if(progress.phase==='verifying') {bar.removeAttribute('value');$('#download-percent').textContent='Verifying';$('#download-detail').textContent='Checking the downloaded package';}
+  else if(progress.phase==='complete') {bar.value=100;$('#download-percent').textContent='Done';$('#download-detail').textContent='Download or installation completed';downloadHideTimer=setTimeout(()=>tray.hidden=true,7000);}
+  else if(progress.phase==='failed') {bar.removeAttribute('value');$('#download-percent').textContent='Stopped';$('#download-detail').textContent='Download or installation failed. See the message above.';downloadHideTimer=setTimeout(()=>tray.hidden=true,12000);}
+}
+window.aether.onComponentProgress(renderDownloadProgress);
 async function action(fn) {
   if (busy) return;
   busy = true; document.body.classList.add('busy');
@@ -210,8 +227,47 @@ function renderTelemetry(next) {
 function details(id) {
   const g = state.games.find(g => g.id === id); if (!g) return;
   dialogGame = id;
-  $('#game-detail').innerHTML = `<h2>${escapeHtml(g.name)}</h2><p>${escapeHtml(g.store)} · ${g.optimized ? 'Windows High performance GPU preference selected' : 'Default Windows GPU preference'}</p><div class="game-path">${escapeHtml(g.executable || g.installDir)}</div><div class="dialog-section-title"><span>GRAPHICS PACKAGES</span><small>Installed beside this game's executable · original files backed up</small></div><div class="game-route-grid"><button class="game-route" data-install-route="mfg" data-id="${escapeHtml(id)}"><span class="route-index">01 / COMMUNITY</span><strong>Latest MFG</strong><small>Multi-frame generation modules from the latest DLSS Unlocked package</small><span class="route-link">Install package ${icon('arrow')}</span></button><button class="game-route" data-install-route="neural" data-id="${escapeHtml(id)}"><span class="route-index">02 / COMMUNITY</span><strong>DLSS neural rendering</strong><small>Neural-rendering files in the same community package</small><span class="route-link">Install package ${icon('arrow')}</span></button><button class="game-route" data-install-route="fsrfg" data-id="${escapeHtml(id)}"><span class="route-index">03 / OPTISCALER</span><strong>FSR frame generation</strong><small>Install the FSR 3 frame-generation route</small><span class="route-link">Install route ${icon('arrow')}</span></button><button class="game-route" data-install-route="fsr4" data-id="${escapeHtml(id)}"><span class="route-index">04 / OPTISCALER</span><strong>FSR 4 route</strong><small>FSR upscaling route with FSR frame generation; actual DLL version varies by package</small><span class="route-link">Install route ${icon('arrow')}</span></button></div><p class="dialog-caveat">File installation does not guarantee in-game activation. Close the game before installing. Current packages and restore points are in Graphics Studio.</p><div class="dialog-actions"><button class="primary" data-game-action="launch" data-id="${escapeHtml(id)}">${icon('play')}Launch game</button>${g.optimized ? `<button class="secondary" data-game-action="undo" data-id="${escapeHtml(id)}">${icon('undo')}Undo preference</button>` : `<button class="secondary" data-game-action="optimize" data-id="${escapeHtml(id)}">${icon('spark')}Optimize game</button>`}<button class="secondary" data-action="open-game-studio" data-id="${escapeHtml(id)}">Graphics Studio ${icon('arrow')}</button></div>`;
+  $('#game-detail').innerHTML = `<h2>${escapeHtml(g.name)}</h2><p>${escapeHtml(g.store)} · ${g.optimized ? 'Windows High performance GPU preference selected' : 'Default Windows GPU preference'}</p><div class="game-path">${escapeHtml(g.executable || g.installDir)}</div><div id="game-install-status" class="game-install-status" aria-live="polite"></div><div class="dialog-section-title"><span>GRAPHICS PACKAGES</span><small>Installed beside this game's executable · original files backed up</small></div><div class="game-route-grid"><button class="game-route" data-install-route="mfg" data-id="${escapeHtml(id)}"><span class="route-index">01 / COMMUNITY</span><strong>Latest MFG</strong><small>Multi-frame generation modules from the latest DLSS Unlocked package</small><span class="route-link">Install package ${icon('arrow')}</span></button><button class="game-route" data-install-route="neural" data-id="${escapeHtml(id)}"><span class="route-index">02 / COMMUNITY</span><strong>DLSS neural rendering</strong><small>Neural-rendering files in the same community package</small><span class="route-link">Install package ${icon('arrow')}</span></button><button class="game-route" data-install-route="fsrfg" data-id="${escapeHtml(id)}"><span class="route-index">03 / OPTISCALER</span><strong>FSR frame generation</strong><small>Install the FSR 3 frame-generation route</small><span class="route-link">Install route ${icon('arrow')}</span></button><button class="game-route" data-install-route="fsr4" data-id="${escapeHtml(id)}"><span class="route-index">04 / OPTISCALER</span><strong>FSR 4 route</strong><small>FSR upscaling route with FSR frame generation; actual DLL version varies by package</small><span class="route-link">Install route ${icon('arrow')}</span></button></div><p class="dialog-caveat">File installation does not guarantee in-game activation. Close the game before installing. Current packages and restore points are in Graphics Studio.</p><div class="dialog-actions"><button class="primary" data-game-action="launch" data-id="${escapeHtml(id)}">${icon('play')}Launch game</button>${g.optimized ? `<button class="secondary" data-game-action="undo" data-id="${escapeHtml(id)}">${icon('undo')}Undo preference</button>` : `<button class="secondary" data-game-action="optimize" data-id="${escapeHtml(id)}">${icon('spark')}Optimize game</button>`}<button class="secondary" data-action="open-game-studio" data-id="${escapeHtml(id)}">Graphics Studio ${icon('arrow')}</button></div>`;
   if (!$('#game-dialog').open) $('#game-dialog').showModal();
+  renderRecordedInstallation(id);
+  if((state.components?.transactions||[]).some(t=>t.gameId===id))refreshInstallStatus(id);
+}
+let statusSequence=0;
+function statusLabel(value){return value==='installed'?'Installed · files verified':value==='missing'?'Missing files':value==='modified'?'Files changed':'Restore pending';}
+function installationMarkup(installations){
+  if(!installations.length)return '<span class="install-empty">No OPlay graphics package installed for this game.</span>';
+  return installations.map(item=>`<div class="install-row"><span class="install-state ${escapeHtml(item.state.replace(/\s/g,'-'))}">${escapeHtml(statusLabel(item.state))}</span><strong>${escapeHtml(item.label)}</strong><small>${item.checked} / ${item.files} files checked</small></div>`).join('');
+}
+function renderRecordedInstallation(gameId){
+  const recorded=(state.components?.transactions||[]).filter(t=>t.gameId===gameId);
+  const placeholder=recorded.length?'<span class="install-checking">Checking OPlay-managed game files…</span>':installationMarkup([]);
+  if(dialogGame===gameId&&$('#game-dialog').open)$('#game-install-status').innerHTML=placeholder;
+  if($('#component-game').value===gameId)$('#component-installed').innerHTML=placeholder;
+  if(dialogGame===gameId&&$('#game-dialog').open)for(const route of $$('#game-dialog .game-route')){
+    route.disabled=recorded.length>0;
+    const badge=document.createElement('span');badge.className='route-state';badge.textContent=recorded.length?'Checking':'Not installed';route.append(badge);
+  }
+}
+async function refreshInstallStatus(gameId){
+  const sequence=++statusSequence;
+  try{
+    const result=await window.aether.components('status',{gameId});
+    if(sequence!==statusSequence)return;
+    const markup=installationMarkup(result.installations);
+    if($('#component-game').value===gameId)$('#component-installed').innerHTML=markup;
+    for(const item of result.installations){const row=$(`.restore-item[data-install-id="${item.id}"] .restore-item-state`);if(row)row.textContent=statusLabel(item.state);}
+    if(dialogGame===gameId&&$('#game-dialog').open){
+      $('#game-install-status').innerHTML=markup;
+      for(const route of $$('#game-dialog .game-route')){
+        const kind=route.dataset.installRoute;
+        const item=result.installations.find(i=>kind==='mfg'||kind==='neural'?i.label.startsWith('DLSS Unlocked'):i.label.startsWith('OptiScaler'));
+        const badge=route.querySelector('.route-state')||document.createElement('span');
+        badge.className='route-state '+(item?.state||'none');
+        badge.textContent=item?item.state==='installed'?'Files installed':statusLabel(item.state):'Not installed';
+        if(!badge.isConnected)route.append(badge);
+      }
+    }
+  }catch(error){if(sequence===statusSequence){const message='Could not verify installed files';if($('#component-game').value===gameId)$('#component-installed').textContent=message;if(dialogGame===gameId&&$('#game-dialog').open)$('#game-install-status').textContent=message;}}
 }
 async function undo(scope) {
   const r = await window.aether.undo(scope); renderState(r.state);
@@ -226,7 +282,7 @@ document.addEventListener('click', e => {
   const f = e.target.closest('[data-filter]'); if (f) { filter = f.dataset.filter; $$('.filter').forEach(el => el.classList.toggle('active', el === f)); renderGames(); return; }
   const detail = e.target.closest('[data-detail]'); if (detail && state) { details(detail.dataset.detail); return; }
   const route = e.target.closest('[data-install-route]');
-  if (route) { action(async () => {
+  if (route) { $('#game-dialog').close(); action(async () => {
     const gameId = route.dataset.id;
     if (!state.games.some(g => g.id === gameId)) throw Error('Choose a library game first.');
     const kind = route.dataset.installRoute;
@@ -353,13 +409,18 @@ function renderStudio() {
   renderGamePicker();
   const c = state.components || {catalog:[],cache:[],transactions:[]};
   const transactions = c.transactions || [];
-  $('#component-backups').innerHTML = transactions.length ? transactions.map(t => `<div class="restore-item"><div><strong>${escapeHtml(t.gameName)}</strong><small>${escapeHtml(t.label)} · ${t.files.length} files · ${escapeHtml(t.status)}</small></div><button class="secondary" data-action="component-restore" data-id="${escapeHtml(t.id)}">Restore original</button></div>`).join('') : '<p class="detail-note">Your original files will appear here when you install a runtime or graphics profile.</p>';
+  const active=transactions.find(t=>t.gameId===$('#component-game').value);
+  renderRecordedInstallation($('#component-game').value);
+  if(transactions.some(t=>t.gameId===$('#component-game').value))refreshInstallStatus($('#component-game').value);
+  $('#component-backups').innerHTML = transactions.length ? transactions.map(t => `<div class="restore-item" data-install-id="${escapeHtml(t.id)}"><div><strong>${escapeHtml(t.gameName)}</strong><small>${escapeHtml(t.label)} · ${t.files.length} files · <span class="restore-item-state">${t.status==='installed'?'Checking files':escapeHtml(t.status)}</span></small></div><button class="secondary" data-action="component-restore" data-id="${escapeHtml(t.id)}">Restore original</button></div>`).join('') : '<p class="detail-note">Your original files will appear here when you install a runtime or graphics profile.</p>';
   const selectedRuntime=$('#force-runtime-select').value;
   $('#force-runtime-select').innerHTML=c.cache.length?c.cache.map(r=>`<option value="${escapeHtml(r.id)}">${escapeHtml(r.label)} · ${escapeHtml(r.version)}</option>`).join(''):'<option value="">Download a runtime first</option>';
   if(c.cache.some(r=>r.id===selectedRuntime))$('#force-runtime-select').value=selectedRuntime;
-  $('#force-runtime-install').disabled=!c.cache.length||!$('#component-game').value;
-  const unlocked=c.community;$('#unlocked-version').textContent=unlocked?.tag||'Check releases';$('#unlocked-install').disabled=!unlocked||!$('#component-game').value;
-  $('#unlocked-status').textContent=unlocked?`${(unlocked.size/1048576).toFixed(0)} MB download · Checked ${c.checkedAt?new Date(c.checkedAt).toLocaleString():'previously'}${c.refreshError?' · '+c.refreshError:''}`:'Refresh the catalog to find the latest package. Download is roughly 600 MB; install size is larger.';
+  $('#force-runtime-install').disabled=!c.cache.length||!$('#component-game').value||!!active;
+  const unlocked=c.community;$('#unlocked-version').textContent=unlocked?.tag||'Check releases';$('#unlocked-install').disabled=!unlocked||!$('#component-game').value||!!active;
+  $('#unlocked-install').textContent=active?(active.label.startsWith('DLSS Unlocked')?'Files installed · restore to change':'Restore current profile first'):'Install package →';
+  const optiButton=$('.mod-panel [data-action="component-opti"]');optiButton.disabled=!$('#component-game').value||!!active;
+  $('#unlocked-status').textContent=active?.label.startsWith('DLSS Unlocked')?'OPlay package recorded for this game. File verification appears above; use Restore original to change it.':unlocked?`${(unlocked.size/1048576).toFixed(0)} MB download · Checked ${c.checkedAt?new Date(c.checkedAt).toLocaleString():'previously'}${c.refreshError?' · '+c.refreshError:''}`:'Refresh the catalog to find the latest package. Download is roughly 600 MB; install size is larger.';
   renderCatalog(); renderComponentResults(); renderCompatibility();
 }
 function renderCatalog() {

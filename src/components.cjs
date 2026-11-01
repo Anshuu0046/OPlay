@@ -47,28 +47,41 @@ async function ensureParents(root,relative,created){
     catch(e){if(e.code!=='ENOENT')throw e;await fs.mkdir(current);created.push(current);}
   }
 }
-async function fetchBytes(url,max,hosts) {
+function transferReporter(callback,total){
+  let lastTime=0,lastBytes=-1;
+  return (bytes,force=false)=>{
+    if(typeof callback!=='function')return;
+    const now=Date.now();
+    if(!force&&now-lastTime<120&&bytes-lastBytes<1048576)return;
+    lastTime=now;lastBytes=bytes;callback(bytes,total);
+  };
+}
+async function fetchBytes(url,max,hosts,onProgress) {
   for(let redirects=0;redirects<6;redirects++){
     const u=new URL(url);if(u.protocol!=='https:'||u.username||u.password||u.port||!hosts.has(u.hostname))throw Error('Download host is not trusted');
-    const response=await fetch(u,{redirect:'manual',signal:AbortSignal.timeout(180000),headers:{'User-Agent':'OPlay/2.3'}});
+    const response=await fetch(u,{redirect:'manual',signal:AbortSignal.timeout(180000),headers:{'User-Agent':'OPlay/2.4'}});
     if(response.status>=300&&response.status<400){url=new URL(response.headers.get('location'),u).href;continue;}
     if(!response.ok)throw Error('Download failed: HTTP '+response.status);
     if(Number(response.headers.get('content-length'))>max)throw Error('Download exceeds size limit');
-    const chunks=[];let size=0;for await(const chunk of response.body){size+=chunk.length;if(size>max)throw Error('Download exceeds size limit');chunks.push(Buffer.from(chunk));}
+    const total=Number(response.headers.get('content-length'))||null;const report=transferReporter(onProgress,total);report(0,true);
+    const chunks=[];let size=0;for await(const chunk of response.body){size+=chunk.length;if(size>max)throw Error('Download exceeds size limit');chunks.push(Buffer.from(chunk));report(size);}
+    report(size,true);
     return Buffer.concat(chunks);
   }throw Error('Too many download redirects');
 }
-async function fetchFile(url,destination,max,hosts){
+async function fetchFile(url,destination,max,hosts,onProgress){
   const partial=destination+'.partial';await fs.rm(partial,{force:true});
   try{
     for(let redirects=0;redirects<6;redirects++){
       const u=new URL(url);if(u.protocol!=='https:'||u.username||u.password||u.port||!hosts.has(u.hostname))throw Error('Download host is not trusted');
-      const response=await fetch(u,{redirect:'manual',signal:AbortSignal.timeout(15*60*1000),headers:{'User-Agent':'OPlay/2.3'}});
+      const response=await fetch(u,{redirect:'manual',signal:AbortSignal.timeout(15*60*1000),headers:{'User-Agent':'OPlay/2.4'}});
       if(response.status>=300&&response.status<400){url=new URL(response.headers.get('location'),u).href;continue;}
       if(!response.ok)throw Error('Download failed: HTTP '+response.status);
       if(Number(response.headers.get('content-length'))>max)throw Error('Download exceeds size limit');
+      const total=Number(response.headers.get('content-length'))||null;const report=transferReporter(onProgress,total);report(0,true);
       let size=0;
-      await pipeline(Readable.fromWeb(response.body),new Transform({transform(chunk,encoding,callback){size+=chunk.length;callback(size>max?Error('Download exceeds size limit'):null,chunk);}}),createWriteStream(partial,{flags:'wx'}));
+      await pipeline(Readable.fromWeb(response.body),new Transform({transform(chunk,encoding,callback){size+=chunk.length;report(size);callback(size>max?Error('Download exceeds size limit'):null,chunk);}}),createWriteStream(partial,{flags:'wx'}));
+      report(size,true);
       await fs.rename(partial,destination);return size;
     }
     throw Error('Too many download redirects');
@@ -120,7 +133,8 @@ async function scanComponents(root) {
   return {root,files,risks,warnings,inspected};
 }
 class Components {
-  constructor(directory,inspect) {this.directory=directory;this.inspect=inspect;this.catalog=[];this.cache=[];this.journal=[];this.community=null;this.fsr=null;this.checkedAt=null;this.refreshError=null;this.file=path.join(directory,'transactions.json');}
+  constructor(directory,inspect,onProgress=()=>{}) {this.directory=directory;this.inspect=inspect;this.onProgress=onProgress;this.catalog=[];this.cache=[];this.journal=[];this.community=null;this.fsr=null;this.checkedAt=null;this.refreshError=null;this.file=path.join(directory,'transactions.json');}
+  progress(label,phase,received=0,total=null){this.onProgress({label,phase,received,total});}
   async load(){await fs.mkdir(this.directory,{recursive:true});this.catalog=await readJson(path.join(this.directory,'catalog.json'),[]);this.cache=await readJson(path.join(this.directory,'cache.json'),[]);this.journal=await readJson(this.file,[]);const feed=await readJson(path.join(this.directory,'community.json'),{});this.community=feed.unlocked||null;this.fsr=feed.fsr||null;this.checkedAt=feed.checkedAt||null;await this.checkPackageCache();}
   async checkPackageCache(){this.communityCached=!!this.community&&await fs.access(path.join(this.directory,'unlocked',this.community.sha256,this.community.name)).then(()=>true,()=>false);this.optiCached=await fs.access(path.join(this.directory,'optiscaler',OPTI.version,'package.7z')).then(()=>true,()=>false);}
   snapshot(){return {catalog:this.catalog,cache:this.cache.map(({file,...record})=>record),transactions:this.journal.map(({changes,...record})=>({...record,files:changes.map(({relative})=>relative)})),optiscaler:OPTI,community:this.community,communityCached:!!this.communityCached,optiCached:!!this.optiCached,fsr:this.fsr,checkedAt:this.checkedAt,refreshError:this.refreshError};}
@@ -137,9 +151,11 @@ class Components {
   async download(id){
     const record=this.catalog.find(r=>r.id===id);if(!record)throw Error('Refresh the catalog and choose a listed component');
     const cached=this.cache.find(r=>r.id===id);if(cached&&await hash(cached.file).catch(()=>null)===cached.sha256)return this.snapshot();
+    const label=record.label+' '+record.version;this.progress(label,'connecting');
     const dir=path.join(this.directory,'downloads',crypto.createHash('sha256').update(id).digest('hex'));await fs.mkdir(dir,{recursive:true});
     const archive=path.join(dir,'package.zip'),file=path.join(dir,record.name);await fs.rm(file,{force:true});
-    await fs.writeFile(archive,await fetchBytes(record.url,134217728,new Set(['dlss-swapper-downloads.beeradmoore.com'])));
+    await fs.writeFile(archive,await fetchBytes(record.url,134217728,new Set(['dlss-swapper-downloads.beeradmoore.com']),(received,total)=>this.progress(label,'downloading',received,total)));
+    this.progress(label,'verifying');
     const script=path.join(__dirname,'component-tools.ps1').replace(/app\.asar([\\/])/,'app.asar.unpacked$1');
     await exec(path.join(process.env.SystemRoot,'System32/WindowsPowerShell/v1.0/powershell.exe'),['-NoProfile','-File',script,'-Action','ExtractZip','-File',archive,'-Destination',file,'-Name',record.name],{windowsHide:true,timeout:30000});
     await pe64(file);if(await hash(file,'md5')!==record.md5)throw Error('Runtime does not match the upstream catalog hash');
@@ -152,6 +168,18 @@ class Components {
     if(/call.of.duty|\bcod\b|sp\d+-cod|valorant|fortnite|counter.strike/i.test(game.name+' '+game.installDir))result.risks.push('Known online/anti-cheat title family');
     for(const f of result.files){try{const file=await safeTarget(result.root,f.relative);Object.assign(f,await this.inspect(file),{sha256:await hash(file)});}catch(e){f.error=e.message;}}
     return result;
+  }
+  async statusGame(game){
+    const installations=[];
+    for(const transaction of this.journal.filter(t=>t.gameId===game.id)){
+      let state=transaction.status==='installed'?'installed':'restore pending',checked=0;
+      if(state==='installed')for(const change of transaction.changes){
+        try{const target=await safeTarget(transaction.root,change.relative);const actual=await hash(target);if(actual!==change.after){state='modified';break;}checked++;}
+        catch(error){state=error.code==='ENOENT'?'missing':'modified';break;}
+      }
+      installations.push({id:transaction.id,label:transaction.label,state,files:transaction.changes.length,checked,at:transaction.at});
+    }
+    return {gameId:game.id,installations};
   }
   async transact(game,changes,label){
     const root=await gameRoot(game.installDir);
@@ -224,13 +252,17 @@ class Components {
   }
   async downloadOpti(){
     const cache=path.join(this.directory,'optiscaler',OPTI.version);await fs.mkdir(cache,{recursive:true});const archive=path.join(cache,'package.7z');
-    if(await hash(archive).catch(()=>null)!==OPTI.sha256){await fs.rm(archive,{force:true});await fetchFile(OPTI.url,archive,134217728,new Set(['github.com','release-assets.githubusercontent.com','objects.githubusercontent.com']));}
+    const label='OptiScaler '+OPTI.version;
+    if(await hash(archive).catch(()=>null)!==OPTI.sha256){this.progress(label,'connecting');await fs.rm(archive,{force:true});await fetchFile(OPTI.url,archive,134217728,new Set(['github.com','release-assets.githubusercontent.com','objects.githubusercontent.com']),(received,total)=>this.progress(label,'downloading',received,total));}
+    this.progress(label,'verifying');
     if(await hash(archive)!==OPTI.sha256)throw Error('OptiScaler release checksum differs');this.optiCached=true;return archive;
   }
   async downloadUnlocked(){
     const release=this.community;if(!release)throw Error('Refresh the community release feed first');
     const cache=path.join(this.directory,'unlocked',release.sha256);await fs.mkdir(cache,{recursive:true});const archive=path.join(cache,release.name);
-    if(await hash(archive).catch(()=>null)!==release.sha256){await fs.rm(archive,{force:true});await fetchFile(release.url,archive,1073741824,new Set(['github.com','release-assets.githubusercontent.com','objects.githubusercontent.com']));}
+    const label='DLSS Unlocked '+release.tag;
+    if(await hash(archive).catch(()=>null)!==release.sha256){this.progress(label,'connecting',0,release.size);await fs.rm(archive,{force:true});await fetchFile(release.url,archive,1073741824,new Set(['github.com','release-assets.githubusercontent.com','objects.githubusercontent.com']),(received,total)=>this.progress(label,'downloading',received,total||release.size));}
+    this.progress(label,'verifying');
     if(await hash(archive)!==release.sha256)throw Error('Community release checksum differs');this.communityCached=true;return archive;
   }
   async installUnlocked(game){

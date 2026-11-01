@@ -28,5 +28,6 @@ contextBridge.exposeInMainWorld('aether', {
   openSettings: target => ipcRenderer.invoke('open-settings', target),
   window: action => ipcRenderer.invoke('window', action),
   onTelemetry: callback => { const listener = (_event, value) => callback(value); ipcRenderer.on('telemetry', listener); return () => ipcRenderer.removeListener('telemetry', listener); },
-  onComponents: callback => { const listener = (_event, value) => callback(value); ipcRenderer.on('components-updated', listener); return () => ipcRenderer.removeListener('components-updated', listener); }
+  onComponents: callback => { const listener = (_event, value) => callback(value); ipcRenderer.on('components-updated', listener); return () => ipcRenderer.removeListener('components-updated', listener); },
+  onComponentProgress: callback => { const listener = (_event, value) => callback(value); ipcRenderer.on('component-progress', listener); return () => ipcRenderer.removeListener('component-progress', listener); }
 });

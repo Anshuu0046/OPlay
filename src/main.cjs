@@ -217,14 +217,16 @@ function handlers() {
   bind('unlocked-docs', () => shell.openExternal('https://github.com/ShyVortex/dlss-unlocked/releases'));
   bind('fsr-docs', () => shell.openExternal('https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/releases'));
   bind('components', (operation, payload = {}) => {
-    if (!['refresh','download','download-opti','download-unlocked','inspect','swap','force-runtime','opti','unlocked','restore'].includes(operation) || !payload || typeof payload !== 'object') throw Error('Invalid component operation');
-    if (TEST && operation !== 'inspect') throw Error('Mutations are disabled in test mode');
+    if (!['refresh','download','download-opti','download-unlocked','inspect','status','swap','force-runtime','opti','unlocked','restore'].includes(operation) || !payload || typeof payload !== 'object') throw Error('Invalid component operation');
+    if (TEST && !['inspect','status'].includes(operation)) throw Error('Mutations are disabled in test mode');
+    const transferOperation=['download','download-opti','download-unlocked','opti','unlocked'].includes(operation);
     const work = componentQueue.then(async () => {
       if (operation === 'refresh') return components.refresh();
       if (operation === 'download') return components.download(payload.id);
       if (operation === 'download-opti') { await components.downloadOpti(); return components.snapshot(); }
       if (operation === 'download-unlocked') { await components.downloadUnlocked(); return components.snapshot(); }
       if (operation === 'inspect') return components.inspectGame(getGame(payload.gameId));
+      if (operation === 'status') return components.statusGame(getGame(payload.gameId));
       const game = operation === 'restore' ? getGame(components.journal.find(t => t.id === payload.id)?.gameId) : getGame(payload.gameId);
       if (['force-runtime','opti','unlocked'].includes(operation) && (!game.executable || !await fs.stat(game.executable).then(s => s.isFile()).catch(() => false))) {
         const executable = await chooseExe(game);
@@ -241,7 +243,8 @@ function handlers() {
       if (operation === 'unlocked') return components.installUnlocked(game);
       return components.installOpti(game, payload.output, payload.upscaler);
     });
-    componentQueue = work.catch(() => {}); return work;
+    const reported=work.then(result=>{if(transferOperation&&win&&!win.isDestroyed())win.webContents.send('component-progress',{phase:'complete'});return result;},error=>{if(transferOperation&&win&&!win.isDestroyed())win.webContents.send('component-progress',{phase:'failed'});throw error;});
+    componentQueue = reported.catch(() => {}); return reported;
   });
 
   bind('report-error', report => {
@@ -404,7 +407,7 @@ app.whenReady().then(async () => {
     const r = await exec(path.join(process.env.SystemRoot, 'System32/WindowsPowerShell/v1.0/powershell.exe'), ['-NoProfile','-File',script,'-Action','Inspect','-File',file], {windowsHide:true,timeout:30000});
     return JSON.parse(r.stdout);
   };
-  components = new Components(path.join(app.getPath('userData'), 'components'), inspector); await components.load();
+  components = new Components(path.join(app.getPath('userData'), 'components'), inspector, progress=>{if(win&&!win.isDestroyed())win.webContents.send('component-progress',progress);}); await components.load();
   nativeTheme.themeSource = settings.theme === 'light' ? 'light' : 'dark';
   startWorker(); inventory = await ask({ action: 'inventory' });
   try { gpuCapability = await ask({ action: 'gpu' }); } catch (e) { runtimeNotice = e.message; errorLog.write('runtime', e); }

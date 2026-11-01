@@ -8,7 +8,7 @@ npm test
 node test/ui.cjs
 npm run dist
 node test/ui.cjs ../../outputs/build/win-unpacked/OPlay.exe
-node test/portable.cjs ../../outputs/build/OPlay-2.3.0-Windows.exe
+node test/portable.cjs ../../outputs/build/OPlay-2.4.0-Windows.exe
 ```
 
 The portable output goes to `../../outputs/build/`. The app uses Electron and built-in Node modules; vendor graphics DLLs are downloaded only when a user chooses a runtime. Build artifacts are not committed to Git. The official release binary is unsigned.

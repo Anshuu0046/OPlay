@@ -32,6 +32,15 @@ test('runtime transaction backs up, verifies, survives restart and restores exac
   await c.transact(game,[{relative:'nvngx_dlss.dll',source}],'runtime');assert.equal(await fs.readFile(target,'utf8'),'replacement bytes');
   const fresh=new Components(c.directory,()=>{});await fresh.load();assert.equal(fresh.journal.length,1);await fresh.restore(fresh.journal[0].id);assert.equal(await fs.readFile(target,'utf8'),'original bytes');assert.equal(fresh.journal.length,0);
 }));
+test('installed state detects verified, modified, and missing game files',()=>fixture(async(c,game,dir)=>{
+  const target=path.join(game.installDir,'dxgi.dll'),source=path.join(dir,'proxy.dll');await fs.writeFile(source,'installed proxy');
+  await c.transact(game,[{relative:'dxgi.dll',source}],'OptiScaler fixture');
+  assert.equal((await c.statusGame(game)).installations[0].state,'installed');
+  await fs.writeFile(target,'changed by game update');assert.equal((await c.statusGame(game)).installations[0].state,'modified');
+  await fs.unlink(target);assert.equal((await c.statusGame(game)).installations[0].state,'missing');
+  await fs.copyFile(source,target);await c.restore(c.journal[0].id);
+  assert.deepEqual((await c.statusGame(game)).installations,[]);
+}));
 test('restore preserves externally updated files and keeps the original backup',()=>fixture(async(c,game,dir)=>{
   const target=path.join(game.installDir,'nvngx_dlss.dll'),source=path.join(dir,'new.dll');await fs.writeFile(target,'original');await fs.writeFile(source,'replacement');await c.transact(game,[{relative:'nvngx_dlss.dll',source}],'runtime');await fs.writeFile(target,'game update');
   await assert.rejects(c.restore(c.journal[0].id),/Changed outside/);assert.equal(await fs.readFile(target,'utf8'),'game update');assert.equal(await fs.readFile(c.journal[0].changes[0].backup,'utf8'),'original');

@@ -10,12 +10,14 @@ const exec=promisify(execFile);
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'oplay-live-'));
   const report={at:new Date().toISOString(),passed:false};
   const inspector=async file=>JSON.parse((await exec('powershell.exe',['-NoProfile','-File',path.resolve(__dirname,'../src/component-tools.ps1'),'-Action','Inspect','-File',file],{windowsHide:true,timeout:45000})).stdout);
-  const manager=new Components(path.join(root,'data'),inspector);await manager.load();
+  const progress=[];const manager=new Components(path.join(root,'data'),inspector,event=>progress.push(event));await manager.load();
   const game={id:'isolated-fixture',name:'OPlay isolated graphics fixture',installDir:path.join(root,'game'),executable:path.join(root,'game','Fixture.exe')};
   try{
     await fs.mkdir(game.installDir);await fs.copyFile(process.execPath,game.executable);
     await manager.refresh();const versions=manager.catalog.filter(r=>r.kind==='fsr_31_dx12');assert.ok(versions.length>=2);
     for(const r of versions.slice(0,2)){console.log('Downloading signed AMD runtime',r.version);await manager.download(r.id);}
+    assert.ok(progress.some(event=>event.phase==='downloading'&&event.received>0),'Real runtime downloads must report transferred bytes');
+    assert.ok(progress.some(event=>event.phase==='verifying'),'Runtime download must report verification');
     const original=manager.cache.find(r=>r.id===versions[1].id);await fs.copyFile(original.file,path.join(game.installDir,original.name));
     const before=await hash(path.join(game.installDir,original.name));const scan=await manager.inspectGame(game);assert.equal(scan.files.length,1);assert.equal(scan.files[0].signature,'Valid');
     await manager.swap(game,original.name,versions[0].id);assert.notEqual(await hash(path.join(game.installDir,original.name)),before);await manager.restore(manager.journal[0].id);assert.equal(await hash(path.join(game.installDir,original.name)),before);

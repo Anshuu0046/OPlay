@@ -38,6 +38,7 @@ async function main() {
     if (state.games.length) {
       await page.locator('.game-art').first().press('Enter'); assert.equal(await page.locator('#game-dialog').evaluate(e => e.open), true);
       assert.equal(await page.locator('#game-dialog .game-route').count(), 4);
+      assert.ok((await page.locator('#game-install-status').innerText()).includes('No OPlay graphics package installed'));
       assert.equal(await page.locator('#game-dialog [data-game-action="optimize"],#game-dialog [data-game-action="undo"]').count(), 1);
       await page.screenshot({path:path.resolve(__dirname,'../../../outputs/OPlay-game-actions-preview.png')});
       await page.keyboard.press('Escape');
@@ -48,6 +49,16 @@ async function main() {
     assert.equal(await page.locator('#force-runtime-install').isVisible(), true);
     assert.equal(await page.locator('#force-runtime-install').isDisabled(), true, 'No runtime is cached in the isolated profile');
     assert.equal(await page.locator('#unlocked-install').isVisible(), true);
+    assert.ok((await page.locator('#component-installed').innerText()).includes('No OPlay graphics package installed'));
+    if(state.games.length)assert.deepEqual((await page.evaluate(id=>window.aether.components('status',{gameId:id}),state.games[0].id)).installations,[]);
+    await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].webContents.send('component-progress',{label:'DLSS Unlocked test package',phase:'downloading',received:5242880,total:10485760}));
+    await page.waitForSelector('#download-tray:not([hidden])');
+    assert.equal(await page.locator('#download-percent').innerText(),'50%');
+    assert.ok((await page.locator('#download-detail').innerText()).includes('5.0 of 10.0 MB'));
+    await page.screenshot({path:path.resolve(__dirname,'../../../outputs/OPlay-download-preview.png')});
+    await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].webContents.send('component-progress',{phase:'complete'}));
+    await page.waitForFunction(()=>document.querySelector('#download-percent').textContent==='Done');
+    await page.evaluate(()=>document.querySelector('#download-tray').hidden=true);
     await page.locator('#game-picker-trigger').click();
     assert.equal(await page.locator('#game-picker-menu').isVisible(), true);
     assert.equal(await page.locator('.game-picker-option').count(), state.games.length);
