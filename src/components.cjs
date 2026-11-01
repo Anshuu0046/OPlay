@@ -59,7 +59,7 @@ function transferReporter(callback,total){
 async function fetchBytes(url,max,hosts,onProgress) {
   for(let redirects=0;redirects<6;redirects++){
     const u=new URL(url);if(u.protocol!=='https:'||u.username||u.password||u.port||!hosts.has(u.hostname))throw Error('Download host is not trusted');
-    const response=await fetch(u,{redirect:'manual',signal:AbortSignal.timeout(180000),headers:{'User-Agent':'OPlay/2.5.1'}});
+    const response=await fetch(u,{redirect:'manual',signal:AbortSignal.timeout(180000),headers:{'User-Agent':'OPlay/2.5.2'}});
     if(response.status>=300&&response.status<400){url=new URL(response.headers.get('location'),u).href;continue;}
     if(!response.ok)throw Error('Download failed: HTTP '+response.status);
     if(Number(response.headers.get('content-length'))>max)throw Error('Download exceeds size limit');
@@ -74,7 +74,7 @@ async function fetchFile(url,destination,max,hosts,onProgress){
   try{
     for(let redirects=0;redirects<6;redirects++){
       const u=new URL(url);if(u.protocol!=='https:'||u.username||u.password||u.port||!hosts.has(u.hostname))throw Error('Download host is not trusted');
-      const response=await fetch(u,{redirect:'manual',signal:AbortSignal.timeout(15*60*1000),headers:{'User-Agent':'OPlay/2.5.1'}});
+      const response=await fetch(u,{redirect:'manual',signal:AbortSignal.timeout(15*60*1000),headers:{'User-Agent':'OPlay/2.5.2'}});
       if(response.status>=300&&response.status<400){url=new URL(response.headers.get('location'),u).href;continue;}
       if(!response.ok)throw Error('Download failed: HTTP '+response.status);
       if(Number(response.headers.get('content-length'))>max)throw Error('Download exceeds size limit');
@@ -173,12 +173,13 @@ class Components {
   async statusGame(game){
     const installations=[];
     for(const transaction of this.journal.filter(t=>t.gameId===game.id)){
-      let state=transaction.status==='installed'?'installed':'restore pending',checked=0;
+      let state=transaction.status==='installed'?'installed':'restore pending',checked=0,configChanged=0;
       if(state==='installed')for(const change of transaction.changes){
-        try{const target=await safeTarget(transaction.root,change.relative);const actual=await hash(target).catch(error=>{if(error.code==='ENOENT')return null;throw error;});if(actual!==change.after){state=actual===null?'missing':'modified';break;}checked++;}
+        try{const target=await safeTarget(transaction.root,change.relative);const actual=await hash(target).catch(error=>{if(error.code==='ENOENT')return null;throw error;});if(actual!==change.after){if(actual&&/\.ini$/i.test(change.relative)&&/^(DLSS Unlocked|OptiScaler)/.test(transaction.label)){configChanged++;checked++;continue;}state=actual===null?'missing':'modified';break;}checked++;}
         catch(error){state=error.code==='ENOENT'?'missing':'modified';break;}
       }
-      installations.push({id:transaction.id,label:transaction.label,state,files:transaction.changes.length,checked,at:transaction.at});
+      if(state==='installed'&&configChanged)state='config changed';
+      installations.push({id:transaction.id,label:transaction.label,state,files:transaction.changes.length,checked,configChanged,at:transaction.at});
     }
     return {gameId:game.id,installations};
   }
@@ -222,18 +223,35 @@ class Components {
     const t=this.journal.find(t=>t.id===id);if(!t)throw Error('Component backup was not found');
     // Check the entire transaction before touching any file. A later game update
     // or another mod must not leave a half-restored profile.
-    const conflicts=[];
+    const conflicts=[],mutableConfigs=new Map();
     for(const c of t.changes){
       try{const target=await safeTarget(t.root,c.relative);const current=await hash(target).catch(e=>{if(e.code==='ENOENT')return null;throw e;});
-        if(current!==c.before&&current!==c.after)conflicts.push(c.relative+': Changed outside OPlay');
-        else if(current===c.after&&c.backup&&await hash(c.backup)!==c.before)conflicts.push(c.relative+': original backup hash differs');
+        if(current!==c.before&&current!==c.after){
+          if(current&&/\.ini$/i.test(c.relative)&&/^(DLSS Unlocked|OptiScaler)/.test(t.label))mutableConfigs.set(c.relative,current);
+          else conflicts.push(c.relative+': Changed outside OPlay');
+        }
+        if(current!==c.before&&c.backup&&await hash(c.backup)!==c.before)conflicts.push(c.relative+': original backup hash differs');
       }catch(e){conflicts.push(c.relative+': '+e.message);}
     }
     if(conflicts.length)throw Error('Restore stopped before changing game files: '+conflicts.join('; '));
+    if(mutableConfigs.size){
+      const recoveryRoot=path.join(this.directory,'recovery',t.id,crypto.randomUUID());await fs.mkdir(recoveryRoot,{recursive:true});
+      const manifest=[];
+      for(const [relative,expected] of mutableConfigs){
+        const target=await safeTarget(t.root,relative),created=[];
+        await ensureParents(recoveryRoot,relative,created);
+        const preserved=await safeTarget(recoveryRoot,relative);
+        await fs.copyFile(target,preserved);
+        if(await hash(preserved)!==expected)throw Error('Changed config backup failed: '+relative);
+        manifest.push({relative,sha256:expected});
+      }
+      await saveJson(path.join(recoveryRoot,'manifest.json'),{gameId:t.gameId,transactionId:t.id,at:new Date().toISOString(),files:manifest});
+      this.lastRecovery=recoveryRoot;
+    }
     const failures=[];
     for(const c of [...t.changes].reverse())try{
       const target=await safeTarget(t.root,c.relative);const current=await hash(target).catch(e=>{if(e.code==='ENOENT')return null;throw e;});
-      if(current===c.before)continue;if(current!==c.after)throw Error('Changed outside OPlay; original backup retained');
+      if(current===c.before)continue;if(current!==c.after&&current!==mutableConfigs.get(c.relative))throw Error('Changed outside OPlay; original backup retained');
       if(c.backup){if(await hash(c.backup)!==c.before)throw Error('Original backup hash differs');await replaceFile(c.backup,target,c.before);}else await fs.unlink(target);
       if(await hash(target).catch(e=>{if(e.code==='ENOENT')return null;throw e;})!==c.before)throw Error('Restore read-back failed');
     }catch(e){failures.push(c.relative+': '+e.message);}
@@ -280,6 +298,11 @@ class Components {
   }
   async installUnlocked(game){
     const release=this.community;if(!release)throw Error('Refresh the community release feed first');
+    const versions=this.catalog.filter(record=>record.kind==='dlss_g'&&/^310\./.test(record.version)).sort((a,b)=>{
+      const left=a.version.split('.').map(Number),right=b.version.split('.').map(Number);
+      for(let i=0;i<Math.max(left.length,right.length);i++){const difference=(right[i]||0)-(left[i]||0);if(difference)return difference;}return 0;
+    });
+    const latest=versions[0];if(!latest)throw Error('No verified DLSS-G 310.x runtime is listed. Refresh the runtime catalog and retry MFG installation.');
     if(!game.executable)throw Error('Choose the actual game executable first');await pe64(game.executable,true);
     const root=await gameRoot(game.installDir),dir=path.dirname(await fs.realpath(game.executable));
     if(dir!==root&&!under(root,dir))throw Error('Executable is outside the game folder');
@@ -292,8 +315,16 @@ class Components {
       if(!Array.isArray(names)||!names.length)throw Error('Community archive contains no installable files');
       const changes=[];
       for(const name of names){const source=path.join(extracted,...name.split('/'));await regular(source,536870912);if(name.toLowerCase().endsWith('.dll'))await pe64(source,true);changes.push({relative:path.relative(root,path.join(dir,...name.split('/'))),source});}
+      // The Ampere MFG loader in this bundle cannot take over a game's older
+      // DLSS-G 3.x runtime. Pair it with a catalog-verified signed 310.x file.
+      await this.download(latest.id);
+      const runtime=this.cache.find(record=>record.id===latest.id);
+      if(!runtime||await hash(runtime.file)!==runtime.sha256)throw Error('Verified DLSS-G runtime is unavailable after download');
+      const runtimeRelative=path.relative(root,path.join(dir,'nvngx_dlssg.dll'));
+      const bundledRuntime=changes.find(change=>change.relative.toLowerCase()===runtimeRelative.toLowerCase());
+      if(bundledRuntime)bundledRuntime.source=runtime.file;else changes.push({relative:runtimeRelative,source:runtime.file});
       for(const name of ['dinput8.dll','version.dll','winmm.dll'])if(!changes.some(change=>path.resolve(root,change.relative).toLowerCase()===path.join(dir,name).toLowerCase()))changes.push({relative:path.relative(root,path.join(dir,name)),source:null});
-      return await this.transact(game,changes,'DLSS Unlocked '+release.tag+' · experimental MFG / neural route');
+      return await this.transact(game,changes,'DLSS Unlocked '+release.tag+' · MFG / neural · DLSS-G '+latest.version);
     }finally{await fs.rm(extracted,{recursive:true,force:true});}
   }
 }

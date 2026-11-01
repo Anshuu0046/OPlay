@@ -258,10 +258,10 @@ function renderLaunchTest(gameId){
   if($('#component-game').value===gameId&&$('#component-launch-test'))$('#component-launch-test').innerHTML=launchTestMessage(gameId);
 }
 function launchNote(gameId){const result=(state.components?.launchTests||[]).find(item=>item.gameId===gameId);return result?.outcome==='crashed'?(result.repaired?'Crash detected; OPlay restored its files and the game passed a second startup check.':'Crash detected. See launch diagnosis in game details.'):'Launch check: '+(result?.outcome==='launched'?'game process stayed open for 25 seconds.':'startup was not confirmed. See game details.');}
-function statusLabel(value){return value==='installed'?'Installed · files verified':value==='missing'?'Missing files':value==='modified'?'Files changed':'Restore pending';}
+function statusLabel(value){return value==='installed'?'Installed · files verified':value==='config changed'?'Installed · mod settings changed':value==='missing'?'Missing files':value==='modified'?'Files changed':'Restore pending';}
 function installationMarkup(installations){
   if(!installations.length)return '<span class="install-empty">No OPlay graphics package installed for this game.</span>';
-  return installations.map(item=>`<div class="install-row"><span class="install-state ${escapeHtml(item.state.replace(/\s/g,'-'))}">${escapeHtml(statusLabel(item.state))}</span><strong>${escapeHtml(item.label)}</strong><small>${item.checked} / ${item.files} files checked</small></div>`).join('');
+  return installations.map(item=>`<div class="install-row"><span class="install-state ${escapeHtml(item.state.replace(/\s/g,'-'))}">${escapeHtml(statusLabel(item.state))}</span><strong>${escapeHtml(item.label)}</strong><small>${item.checked} / ${item.files} files checked${item.configChanged?' · '+item.configChanged+' setting file changed':''}</small></div>`).join('');
 }
 function renderRecordedInstallation(gameId){
   const recorded=(state.components?.transactions||[]).filter(t=>t.gameId===gameId);
@@ -288,7 +288,7 @@ async function refreshInstallStatus(gameId){
         const item=result.installations.find(i=>kind==='mfg'||kind==='neural'?i.label.startsWith('DLSS Unlocked'):i.label.startsWith('OptiScaler'));
         const badge=route.querySelector('.route-state')||document.createElement('span');
         badge.className='route-state '+(item?.state||'none');
-        badge.textContent=item?item.state==='installed'?'Files installed':statusLabel(item.state):'Not installed';
+        badge.textContent=item?['installed','config changed'].includes(item.state)?'Files installed':statusLabel(item.state):'Not installed';
         if(!badge.isConnected)route.append(badge);
       }
     }

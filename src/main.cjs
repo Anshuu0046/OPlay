@@ -240,7 +240,7 @@ async function checkGameLaunch(game, rollbackOnCrash = true) {
     if(transaction){
       try {
         const status=await components.statusGame(game);
-        if(!status.installations.some(item=>item.id===transaction.id&&item.state==='installed'))throw Error('Installed files changed after OPlay wrote them');
+        if(!status.installations.some(item=>item.id===transaction.id&&['installed','config changed'].includes(item.state)))throw Error('Installed files changed after OPlay wrote them');
         if((await ask({action:'gameRunning',root:game.installDir})).length)throw Error('Game process is still running');
         if(win&&!win.isDestroyed())win.webContents.send('component-progress',{label:game.name,phase:'rollback'});
         await components.restore(transaction.id);result.rollback='restored';
@@ -270,7 +270,7 @@ async function pollRecentGameCrashes(){
       try{
         if((await ask({action:'gameRunning',root:game.installDir})).length)throw Error('Game process is still running');
         const status=await components.statusGame(game);
-        if(!status.installations.some(item=>item.id===transaction.id&&item.state==='installed'))throw Error('Installed files changed after OPlay wrote them');
+        if(!status.installations.some(item=>item.id===transaction.id&&['installed','config changed'].includes(item.state)))throw Error('Installed files changed after OPlay wrote them');
         await components.restore(transaction.id);result.rollback='restored';result.guidance+=' OPlay restored its unchanged files after the crash. Use Test launch when ready to check the original profile.';
       }catch(error){result.rollback='blocked';result.rollbackReason=error.message;result.guidance+=' Automatic restore stopped: '+error.message;errorLog.write('game-launch-rollback',error);}
     }

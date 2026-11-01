@@ -67,6 +67,18 @@ test('graphics transaction stages a conflicting proxy and restores it exactly',(
   assert.equal(await fs.readFile(proxy,'utf8'),'older proxy');
   await assert.rejects(fs.stat(mod),/ENOENT/);
 }));
+test('restore preserves a config rewritten by a running mod before rollback',()=>fixture(async(c,game,dir)=>{
+  const source=path.join(dir,'profile.ini'),target=path.join(game.installDir,'OptiScaler.ini');
+  await fs.writeFile(source,'Initial=true\n');
+  await c.transact(game,[{relative:'OptiScaler.ini',source}],'DLSS Unlocked fixture');
+  await fs.writeFile(target,'Initial=true\nChangedByMod=true\n');
+  assert.deepEqual((await c.statusGame(game)).installations.map(item=>[item.state,item.configChanged]),[['config changed',1]]);
+  await c.restore(c.journal[0].id);
+  await assert.rejects(fs.stat(target),/ENOENT/);
+  assert.equal(await fs.readFile(path.join(c.lastRecovery,'OptiScaler.ini'),'utf8'),'Initial=true\nChangedByMod=true\n');
+  const manifest=JSON.parse(await fs.readFile(path.join(c.lastRecovery,'manifest.json'),'utf8'));
+  assert.equal(manifest.files[0].relative,'OptiScaler.ini');
+}));
 test('a staged write failure rolls back earlier writes and leaves no partial profile',()=>fixture(async(c,game,dir)=>{
   const a=path.join(game.installDir,'a.dll'),b=path.join(game.installDir,'b.dll'),source=path.join(dir,'new.dll');await fs.writeFile(a,'original-a');await fs.writeFile(b,'original-b');await fs.writeFile(source,'replacement');
   const rename=fs.rename;fs.rename=async(from,to)=>{if(path.basename(to)==='b.dll'&&path.basename(from).startsWith('.oplay-'))throw Error('injected locked game file');return rename(from,to);};
