@@ -8,7 +8,7 @@ The [public download site](https://oplay-windows-library.anshumantripathy0056.ch
 
 ## Interface
 
-The interface uses one frosted glass navigation rail, soft material lighting, widescreen game artwork, a cover grid and dark/light themes. Steam hero artwork is read separately from portrait covers. Windows 11 22H2+ uses native DWM Acrylic; older Windows has a fallback. System transparency preferences are preserved. The initial window fits the monitor work area. Keyboard navigation, drag selection, reduced motion, visible focus states and 1040-pixel layouts are tested. The game picker is a keyboard-accessible glass menu; top-edge window control clicks are covered by the UI test.
+The interface uses one horizontal frosted glass navigation bar, restrained red accents, native glass, widescreen game artwork, a cover grid and dark/light themes. Steam hero artwork is read separately from portrait covers. Windows 11 22H2+ uses native DWM Acrylic; older Windows has a fallback. System transparency preferences are preserved. The initial window fits the monitor work area. Keyboard navigation, drag selection, reduced motion, visible focus states and 1040-pixel layouts are tested. The game picker is a keyboard-accessible glass menu; top-edge window control clicks are covered by the UI test.
 
 ## Graphics Studio
 

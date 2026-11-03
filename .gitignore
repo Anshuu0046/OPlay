@@ -10,4 +10,5 @@ build/
 *.zip
 test-results/
 playwright-report/
+.hallmark/
 *.tmp
