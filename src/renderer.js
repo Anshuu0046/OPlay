@@ -250,8 +250,9 @@ function launchTestMessage(gameId){
   const crash=result.crash?`<small>Windows event: ${escapeHtml(new Date(result.crash.at).toLocaleString())} · ${escapeHtml(result.crash.app)} · ${escapeHtml(result.crash.module)} · 0x${escapeHtml(result.crash.code)}</small>`:'';
   const gpu=result.gpuEvents?.length?`<small>GPU driver event: ${escapeHtml(new Date(result.gpuEvents[0].at).toLocaleString())} · ${escapeHtml(result.gpuEvents[0].provider)} · ID ${escapeHtml(result.gpuEvents[0].id)}</small>`:'';
   const logs=(result.logHints||[]).slice(-3).map(hint=>`<small>${escapeHtml(hint.source)}: ${escapeHtml(hint.text)}</small>`).join('');
+  const features=(result.featureFindings||[]).map(finding=>`<small>${escapeHtml(finding)}</small>`).join('');
   const rollback=result.rollback==='restored'?`<small>OPlay package restored.${result.baseline?' Second check: '+escapeHtml(result.baseline.outcome)+'.':' Run Test launch when ready.'}</small>`:result.rollback==='blocked'?`<small>Automatic restore blocked: ${escapeHtml(result.rollbackReason)}</small>`:'';
-  return `<strong>${escapeHtml(title)}</strong><small>Checked ${escapeHtml(time)}</small>${crash}${gpu}${logs}${rollback}<p>${escapeHtml(result.guidance)}</p>`;
+  return `<strong>${escapeHtml(title)}</strong><small>Checked ${escapeHtml(time)}</small>${crash}${gpu}${features}${logs}${rollback}<p>${escapeHtml(result.guidance)}</p>`;
 }
 function renderLaunchTest(gameId){
   if(dialogGame===gameId&&$('#game-dialog').open)$('#game-launch-test').innerHTML=launchTestMessage(gameId);

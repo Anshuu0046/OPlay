@@ -12,7 +12,7 @@ const { Journal } = require('./journal.cjs');
 const { GpuControl } = require('./gpu-control.cjs');
 const { ErrorLog } = require('./error-log.cjs');
 const { Components } = require('./components.cjs');
-const { observeLaunch, explain, proxyFiles, gameLogHints, watchSince, unseenCrash } = require('./launch-check.cjs');
+const { observeLaunch, explain, proxyFiles, gameLogHints, graphicsFeatureFindings, watchSince, unseenCrash } = require('./launch-check.cjs');
 const exec = promisify(execFile);
 const ROOT = __dirname;
 const trustedDocument = realpathSync(path.join(ROOT, 'index.html')).toLowerCase();
@@ -232,8 +232,10 @@ async function checkGameLaunch(game, rollbackOnCrash = true) {
   });
   const result = await run();
   result.gameId=game.id;result.gameName=game.name;result.proxies=proxies;
+  result.featureFindings=await graphicsFeatureFindings(game.installDir,result.startedAt);
   if(result.crash){result.gpuEvents=(await ask({action:'gpuResetEvents',since:result.startedAt}).catch(()=>[])).filter(event=>Date.parse(event.at)<=Date.parse(result.crash.at)+2000);result.logHints=await gameLogHints(game.installDir,result.startedAt);}
   result.guidance=explain(result,proxies);
+  if(result.featureFindings.some(finding=>finding.startsWith('Neural runtime did not load')))result.guidance+=' The neural runtime failed to load; the installed files alone do not establish neural rendering.';
   if(result.crash)errorLog.write('game-launch-crash',JSON.stringify({game:game.name,...result.crash,proxies}));
   if(result.outcome==='crashed'&&rollbackOnCrash){
     const transaction=components.journal.find(t=>t.gameId===game.id);
@@ -262,7 +264,7 @@ async function pollRecentGameCrashes(){
     const crash=unseenCrash(events,components.launchTests,since);
     if(!crash)continue;
     const gpuEvents=(await ask({action:'gpuResetEvents',since}).catch(()=>[])).filter(event=>Date.parse(event.at)<=Date.parse(crash.at)+2000);
-    const result={gameId:game.id,gameName:game.name,startedAt:since,finishedAt:crash.at,outcome:'crashed',late:true,crash,proxies:prior.proxies||[],gpuEvents,logHints:await gameLogHints(game.installDir,since)};
+    const result={gameId:game.id,gameName:game.name,startedAt:since,finishedAt:crash.at,outcome:'crashed',late:true,crash,proxies:prior.proxies||[],gpuEvents,logHints:await gameLogHints(game.installDir,since),featureFindings:await graphicsFeatureFindings(game.installDir,since)};
     result.guidance=explain(result,result.proxies);
     errorLog.write('game-launch-crash',JSON.stringify({game:game.name,...crash,gpuEvents:result.gpuEvents}));
     const transaction=components.journal.find(t=>t.gameId===game.id);

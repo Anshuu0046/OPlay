@@ -23,6 +23,20 @@ async function gameLogHints(root, since) {
   }
   return hints.slice(-6);
 }
+async function graphicsFeatureFindings(root,since){
+  const file=path.join(root,'OptiScaler.log');
+  try{
+    const info=await fs.stat(file);
+    if(!info.isFile()||info.mtimeMs<Date.parse(since)-60000)return [];
+    const handle=await fs.open(file,'r');let content;
+    try{const size=Math.min(info.size,262144),buffer=Buffer.alloc(size);await handle.read(buffer,0,size,info.size-size);content=buffer.toString('utf8');}finally{await handle.close();}
+    const findings=[];
+    if(/AmpereMfgLoader[^\r\n]*SM86\/SM75 MFG loaded successfully/i.test(content))findings.push('MFG module loaded. Generated frames have not been measured.');
+    if(/DlssNr\.Enabled: true/i.test(content))findings.push('Neural rendering enabled in the profile.');
+    if(/nvLoadSignedLibraryW\(\) failed on snippet[^\r\n]*nvngx_dlssnr\.dll|Feature dlssnr failed to load override module/i.test(content))findings.push('Neural runtime did not load: NVIDIA reported missing or invalid DLL metadata. Check the runtime version and signature.');
+    return findings;
+  }catch(error){if(error.code==='ENOENT')return [];return ['Graphics feature log could not be read: '+error.message];}
+}
 function watchSince(item){return item?.baseline?.outcome==='launched'?item.baseline.finishedAt:item?.outcome==='launched'?item.finishedAt:null;}
 function unseenCrash(events,history,since){return events.find(event=>Date.parse(event.at)>Date.parse(since)&&!history.some(item=>item.crash?.reportId===event.reportId));}
 
@@ -66,4 +80,4 @@ async function observeLaunch({ launch, running, crashes, onUpdate = () => {}, wa
   return { startedAt, finishedAt: new Date(now()).toISOString(), outcome, firstSeenAt: firstSeen === null ? null : new Date(firstSeen).toISOString(), processNames: lastNames, crash };
 }
 
-module.exports = { observeLaunch, explain, proxyFiles, gameLogHints, watchSince, unseenCrash };
+module.exports = { observeLaunch, explain, proxyFiles, gameLogHints, graphicsFeatureFindings, watchSince, unseenCrash };

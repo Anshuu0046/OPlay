@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { observeLaunch, explain, gameLogHints, watchSince, unseenCrash } = require('../src/launch-check.cjs');
+const { observeLaunch, explain, gameLogHints, graphicsFeatureFindings, watchSince, unseenCrash } = require('../src/launch-check.cjs');
 
 test('launch check distinguishes a stable process from a crash and an absent launch', async () => {
   let time = 0, polls = 0;
@@ -26,6 +26,15 @@ test('launch diagnosis reads recent graphics errors without loading whole logs',
     await fs.writeFile(path.join(dir,'OptiScaler.log'),'normal\n'+('normal filler\n'.repeat(6000))+'[E] GPU device suspended\n');
     const hints=await gameLogHints(dir,new Date(Date.now()-1000).toISOString());
     assert.equal(hints.length,1);assert.match(hints[0].text,/GPU device suspended/);
+  }finally{await fs.rm(dir,{recursive:true,force:true});}
+});
+test('launch report distinguishes a loaded MFG module from a failed neural runtime',async()=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'oplay-feature-log-'));
+  try{
+    await fs.writeFile(path.join(dir,'OptiScaler.log'),'[I] DlssNr.Enabled: true\n[I] AmpereMfgLoader: SM86/SM75 MFG loaded successfully\n[I] nvLoadSignedLibraryW() failed on snippet nvngx_dlssnr.dll missing or corrupted\n');
+    const findings=await graphicsFeatureFindings(dir,new Date(Date.now()-1000).toISOString());
+    assert.equal(findings.length,3);assert.match(findings[0],/loaded.*not been measured/i);assert.match(findings[2],/did not load/);
+    assert.deepEqual(await graphicsFeatureFindings(dir,new Date(Date.now()+120000).toISOString()),[]);
   }finally{await fs.rm(dir,{recursive:true,force:true});}
 });
 test('late crash watcher ignores duplicate and old Windows reports',()=>{

@@ -26,6 +26,10 @@ async function main(){
     assert.equal(components.snapshot().communityCached,true,'Community download should be visible in Runtime library');
     const transaction=components.journal[0];assert.equal(transaction.status,'installed');report.installedFiles=transaction.changes.length;
     for(const name of ['dxgi.dll','OptiScaler.ini','nvngx_dlssnr.dll',path.join('OptiScaler','dlssg_sm86','dlssg_sm86.dll')])assert.ok((await fs.stat(path.join(gameDir,name))).size>0,name+' missing');
+    const ini=await fs.readFile(path.join(gameDir,'OptiScaler.ini'),'utf8');
+    const neural=ini.split(/^\[DlssNr\]\r?\n/m)[1]?.split(/^\[/m)[0]||'';
+    assert.match(neural,/^Enabled=true\r?$/m,'Neural rendering should be enabled in the installed profile');
+    assert.match(neural,/^RunBeforeSR=true\r?$/m,'Neural rendering should run before upscaling');
     assert.ok((await fs.stat(path.join(gameDir,'nvngx_dlssg.dll'))).size>0,'Signed DLSS-G 310.x runtime missing');
     await assert.rejects(fs.stat(path.join(gameDir,'winmm.dll')),/ENOENT/,'Existing proxy should be staged during the install');
     assert.ok(transaction.changes.length>=40,'Expected bundled modules, not only a proxy');

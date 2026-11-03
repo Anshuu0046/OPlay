@@ -314,7 +314,16 @@ class Components {
       const names=JSON.parse(result.stdout);
       if(!Array.isArray(names)||!names.length)throw Error('Community archive contains no installable files');
       const changes=[];
-      for(const name of names){const source=path.join(extracted,...name.split('/'));await regular(source,536870912);if(name.toLowerCase().endsWith('.dll'))await pe64(source,true);changes.push({relative:path.relative(root,path.join(dir,...name.split('/'))),source});}
+      for(const name of names){const source=path.join(extracted,...name.split('/'));await regular(source,536870912);if(name.toLowerCase().endsWith('.dll'))await pe64(source,true);
+        if(name==='OptiScaler.ini'){
+          let ini=await fs.readFile(source,'utf8');
+          const enable=/(^\[DlssNr\][\s\S]*?^Enabled=)(?:auto|false|true)(?=\r?$)/mi;
+          const beforeSr=/(^\[DlssNr\][\s\S]*?^RunBeforeSR=)(?:auto|false|true)(?=\r?$)/mi;
+          if(!enable.test(ini)||!beforeSr.test(ini))throw Error('Community neural-rendering profile layout changed');
+          ini=ini.replace(enable,'$1true').replace(beforeSr,'$1true');
+          await fs.writeFile(source,ini);
+        }
+        changes.push({relative:path.relative(root,path.join(dir,...name.split('/'))),source});}
       // The Ampere MFG loader in this bundle cannot take over a game's older
       // DLSS-G 3.x runtime. Pair it with a catalog-verified signed 310.x file.
       await this.download(latest.id);
