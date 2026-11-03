@@ -1,6 +1,6 @@
-# OPlay 2.5.2
+# OPlay 1.0.0
 
-[Download OPlay for Windows](https://github.com/Anshuu0046/OPlay/releases/download/v2.5.2/OPlay-2.5.2-Windows.exe) · [SHA-256 checksums](https://github.com/Anshuu0046/OPlay/releases/download/v2.5.2/SHA256SUMS.txt) · [Installation guide](https://github.com/Anshuu0046/OPlay/blob/main/docs/INSTALL.md)
+[Download OPlay for Windows](https://github.com/Anshuu0046/OPlay/releases/download/v1.0.0/OPlay-1.0.0-Windows.exe) · [SHA-256 checksums](https://github.com/Anshuu0046/OPlay/releases/download/v1.0.0/SHA256SUMS.txt) · [Installation guide](https://github.com/Anshuu0046/OPlay/blob/main/docs/INSTALL.md)
 
 OPlay is a local Windows game library with graphics runtime management, live hardware telemetry, reversible optimization settings, and supported NVIDIA GPU tuning. This is a portable x64 executable; no separate installer is needed.
 
@@ -25,4 +25,4 @@ The 33 automated app tests, source and packaged UI tests, an isolated 63-file in
 
 Graphics DLLs and community packages are downloaded only when requested; they are not bundled in the EXE. Compatibility depends on each game, driver, and package. OPlay does not bypass anti-cheat, add a kernel driver, or expose CPU multiplier/system-RAM frequency overclocking on the examined hardware. The EXE is unsigned, so Windows may show a SmartScreen prompt.
 
-**SHA-256:** `d6a67eb943c0c084ef3d0cd201ebf932524f00377af61350c46ae05346028007` for `OPlay-2.5.2-Windows.exe`.
+**SHA-256:** `bf174db8da2a090cde8ad5225e7eedc56b93caea1d700ee03719451111b09d61` for `OPlay-1.0.0-Windows.exe`.

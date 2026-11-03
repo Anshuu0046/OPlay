@@ -1,7 +1,7 @@
 # Install and update
 
 1. Download the current `OPlay-*-Windows.exe` from [GitHub Releases](https://github.com/Anshuu0046/OPlay/releases).
-2. Compare the executable SHA-256 with `SHA256SUMS.txt` in the same release. In PowerShell: `Get-FileHash .\OPlay-2.5.2-Windows.exe -Algorithm SHA256`.
+2. Compare the executable SHA-256 with `SHA256SUMS.txt` in the same release. In PowerShell: `Get-FileHash .\OPlay-1.0.0-Windows.exe -Algorithm SHA256`.
 3. Run the portable executable on Windows x64. It extracts before the app opens. Windows SmartScreen may warn because this build is not code signed.
 4. Let OPlay discover Steam, Epic and GOG entries. Use **Add a game** or **Scan a game folder** for other installations.
 

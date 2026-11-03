@@ -1,8 +1,8 @@
-# OPlay 2.5.2 for Windows
+# OPlay 1.0.0 for Windows
 
-OPlay is a local Windows game library with graphics runtime management, live telemetry and reversible system profiles. Download `OPlay-2.5.2-Windows.exe` from the [official releases](https://github.com/Anshuu0046/OPlay/releases). Run the portable executable; it extracts before opening. Windows x64; verified on Windows 11. The executable is unsigned, so Windows SmartScreen may ask for confirmation. Check the release SHA-256 before running it.
+OPlay is a local Windows game library with graphics runtime management, live telemetry and reversible system profiles. Download `OPlay-1.0.0-Windows.exe` from the [official releases](https://github.com/Anshuu0046/OPlay/releases). Run the portable executable; it extracts before opening. Windows x64; verified on Windows 11. The executable is unsigned, so Windows SmartScreen may ask for confirmation. Check the release SHA-256 before running it.
 
-See [what's new in 2.5.2](docs/RELEASE_NOTES_2.5.2.md) for the release highlights, supported controls, verification, and limits.
+See [what's new in 1.0.0](docs/RELEASE_NOTES_1.0.0.md) for the release highlights, supported controls, verification, and limits.
 
 The [public download site on Vercel](https://oplay-windows-library.vercel.app/) provides the latest verified release link. The source and documentation are in this repository. OPlay is independent from DLSS Swapper, DLSS 5 Manager and OptiScaler.
 
@@ -79,7 +79,7 @@ powershell -NoProfile -File test/nvidia-sensor.ps1
 node test/windows-live.cjs
 npm run dist
 node test/ui.cjs ../../outputs/build/win-unpacked/OPlay.exe
-node test/portable.cjs ../../outputs/build/OPlay-2.5.2-Windows.exe
+node test/portable.cjs ../../outputs/build/OPlay-1.0.0-Windows.exe
 ```
 
 `components-live` uses a generated fixture with real signed upstream runtimes; it never launches the fixture or modifies a user game. It verifies download/signature checks, DLL swap/restore, upstream OptiScaler extraction/profile installation and exact restoration of the initial folder. `unlocked-live` verifies the full checksum-matched community package in a generated fixture, then restores the folder exactly. Run `node test/unlocked-live.cjs <optional path to verified standalone ZIP>` to repeat it; without a local archive it downloads the current package. Unit tests cover tampered catalogs, traversal/links, direct installs, preservation of external changes, restart recovery and rollback after an injected locked-file failure. UI tests use isolated profiles, disable OS/game mutations, and check library interactions, both themes, Graphics Studio, native Acrylic, keyboard/drag/reduced-motion behavior, layouts, sandboxing and automatic error logs.

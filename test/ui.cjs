@@ -130,6 +130,7 @@ async function main() {
     assert.equal(await page.locator('.rail-pill').evaluate(e => getComputedStyle(e).transitionDuration), '0s');
     await page.emulateMedia({ reducedMotion: 'no-preference' });
     await page.evaluate(() => { window.scrollTo(0, 0); document.querySelector('#toast').classList.remove('visible'); });
+    await page.locator('#toast').evaluate(el => Promise.all(el.getAnimations().map(a => a.finished.catch(() => {}))));
     await page.locator('#page-library').evaluate(el => Promise.all(el.getAnimations({ subtree: true }).map(a => a.finished.catch(() => {}))));
     await fs.mkdir(path.resolve(__dirname, '../../../outputs'), { recursive: true });
     await page.screenshot({ path: path.resolve(__dirname, '../../../outputs/OPlay-preview.png'), fullPage: true });

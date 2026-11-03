@@ -59,7 +59,7 @@ function transferReporter(callback,total){
 async function fetchBytes(url,max,hosts,onProgress) {
   for(let redirects=0;redirects<6;redirects++){
     const u=new URL(url);if(u.protocol!=='https:'||u.username||u.password||u.port||!hosts.has(u.hostname))throw Error('Download host is not trusted');
-    const response=await fetch(u,{redirect:'manual',signal:AbortSignal.timeout(180000),headers:{'User-Agent':'OPlay/2.5.2'}});
+    const response=await fetch(u,{redirect:'manual',signal:AbortSignal.timeout(180000),headers:{'User-Agent':'OPlay/1.0.0'}});
     if(response.status>=300&&response.status<400){url=new URL(response.headers.get('location'),u).href;continue;}
     if(!response.ok)throw Error('Download failed: HTTP '+response.status);
     if(Number(response.headers.get('content-length'))>max)throw Error('Download exceeds size limit');
@@ -74,7 +74,7 @@ async function fetchFile(url,destination,max,hosts,onProgress){
   try{
     for(let redirects=0;redirects<6;redirects++){
       const u=new URL(url);if(u.protocol!=='https:'||u.username||u.password||u.port||!hosts.has(u.hostname))throw Error('Download host is not trusted');
-      const response=await fetch(u,{redirect:'manual',signal:AbortSignal.timeout(15*60*1000),headers:{'User-Agent':'OPlay/2.5.2'}});
+      const response=await fetch(u,{redirect:'manual',signal:AbortSignal.timeout(15*60*1000),headers:{'User-Agent':'OPlay/1.0.0'}});
       if(response.status>=300&&response.status<400){url=new URL(response.headers.get('location'),u).href;continue;}
       if(!response.ok)throw Error('Download failed: HTTP '+response.status);
       if(Number(response.headers.get('content-length'))>max)throw Error('Download exceeds size limit');
