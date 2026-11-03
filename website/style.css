@@ -12,3 +12,5 @@ body{background:radial-gradient(circle at 88% 8%,#290b0e 0,#020203 24%);backgrou
 .detail-band{background:linear-gradient(120deg,#151316,#0a0a0c 70%)}
 .download-panel{border-color:#5c3035;background:linear-gradient(120deg,#201013,#0e0b0d);box-shadow:0 15px 45px #0004}
 .header-download{border-color:#514044}
+.latest-section{padding:105px 0 30px}.latest-section .feature-grid{margin-top:35px}.latest-section .section-heading a{color:var(--accent);white-space:nowrap}.latest-section .section-heading a:hover{text-decoration:underline}
+@media(max-width:670px){.latest-section{padding:75px 0 20px}}
